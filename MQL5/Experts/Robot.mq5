@@ -1074,8 +1074,16 @@ int OnInit()
 //+------------------------------------------------------------------+
 //| FUNÇÃO ONTIMER                                                   |
 //+------------------------------------------------------------------+
+//| O OnTimer só desenha objetos no gráfico (linhas de SL/TP/BE/TS,  |
+//| o desenho do HiLo, o painel) - nenhuma decisão de entrada/saída  |
+//| depende dele, isso tudo roda no OnTick. No Strategy Tester, esse |
+//| redesenho pesado e repetido (até 1500 objetos de tendência do    |
+//| HiLo a cada 3s) trava/congela o terminal. Por isso o timer só é  |
+//| ligado fora do tester.                                           |
+//+------------------------------------------------------------------+
 
-   EventSetTimer(3);
+   if(!MQLInfoInteger(MQL_TESTER))
+      EventSetTimer(3);
 
 //+------------------------------------------------------------------+
 //| CARREGAMENTO DO ROBÔ NO GRÁFICO                                  |
