@@ -71,10 +71,11 @@
   #resource "\\Indicators\\BB-Madyson.ex5"
   #resource "\\Indicators\\MediaMovel.ex5"
   #resource "\\Indicators\\MT5_MM_Points.ex5"
-  #resource "\\Indicators\\Nexus_Zonas_11.ex5"
-  #resource "\\Indicators\\VPRangev6.ex5"
-  #resource "\\Indicators\\SupportResistanceRejectionPro.ex5"
-  #resource "\\Indicators\\ShowTrades.ex5"
+  // Nexus_Zonas_11, VPRangev6, SupportResistanceRejectionPro e ShowTrades NÃO são
+  // embutidos via #resource: são indicadores de terceiros que o compilador rejeita
+  // ao tentar reprocessá-los como recurso embutido (erro de compilação). Em vez
+  // disso são carregados em tempo de execução via iCustom(), exigindo que os .ex5
+  // estejam fisicamente em MQL5\Indicators\ no terminal onde o robô rodar.
 
 //---
 
@@ -816,7 +817,7 @@ int OnInit()
 
    if(estrategia == estrategia_nexus_zonas)
    {
-      handleNexusZonas = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "::Indicators\\Nexus_Zonas_11.ex5");
+      handleNexusZonas = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "Nexus_Zonas_11");
       if(handleNexusZonas == INVALID_HANDLE)
       {
          PrintFormat("Robot -> Falha ao criar o identificador do indicador NEXUS ZONAS para o símbolo %s/%s, erro código %d",
@@ -837,7 +838,7 @@ int OnInit()
 
    if(estrategia == estrategia_vprange)
    {
-      handleVPRange = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "::Indicators\\VPRangev6.ex5");
+      handleVPRange = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "VPRangev6");
       if(handleVPRange == INVALID_HANDLE)
       {
          PrintFormat("Robot -> Falha ao criar o identificador do indicador VPRANGE para o símbolo %s/%s, erro código %d",
@@ -858,7 +859,7 @@ int OnInit()
 
    if(estrategia == estrategia_sr_rejection)
    {
-      handleSRRejection = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "::Indicators\\SupportResistanceRejectionPro.ex5");
+      handleSRRejection = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "SupportResistanceRejectionPro");
       if(handleSRRejection == INVALID_HANDLE)
       {
          PrintFormat("Robot -> Falha ao criar o identificador do indicador SUPPORT RESISTANCE REJECTION PRO para o símbolo %s/%s, erro código %d",
@@ -880,7 +881,7 @@ int OnInit()
 
    if(exibirShowTrades == Ligado)
    {
-      handleShowTrades = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "::Indicators\\ShowTrades.ex5");
+      handleShowTrades = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "ShowTrades");
       if(handleShowTrades == INVALID_HANDLE)
          PrintFormat("Robot -> Falha ao criar o identificador do indicador SHOWTRADES para o símbolo %s/%s, erro código %d",
                      Symbol(),
