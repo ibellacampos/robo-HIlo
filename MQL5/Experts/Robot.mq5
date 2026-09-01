@@ -71,6 +71,10 @@
   #resource "\\Indicators\\BB-Madyson.ex5"
   #resource "\\Indicators\\MediaMovel.ex5"
   #resource "\\Indicators\\MT5_MM_Points.ex5"
+  #resource "\\Indicators\\Nexus_Zonas_11.ex5"
+  #resource "\\Indicators\\VPRangev6.ex5"
+  #resource "\\Indicators\\SupportResistanceRejectionPro.ex5"
+  #resource "\\Indicators\\ShowTrades.ex5"
 
 //---
 
@@ -162,7 +166,10 @@ CAccountInfo          m_account;                    // account info wrapper
     estrategia_cruzamento_de_medias,      // [01] Cruzamento De Duas Médias
     estrategia_bb,                        // [02] Bandas de Bollinger
     estrategia_afastamento_de_media,      // [03] Afastamento de Média
-    estrategia_virada_hilo                // [04] Virada de HiLo
+    estrategia_virada_hilo,               // [04] Virada de HiLo
+    estrategia_nexus_zonas,               // [05] Nexus Zonas
+    estrategia_vprange,                   // [06] VPRange (Volume Profile)
+    estrategia_sr_rejection               // [07] Support Resistance Rejection Pro
   };
 
 //+------------------------------------------------------------------+
@@ -271,6 +278,21 @@ input color                    corVendaHilo = C'255,69,0';                      
 input int                      espessuraVendaHilo = 3;                                  // [08] Espessura Venda [SET: 3]
 input string                   hilo03;                                                  // ➱ SAÍDA
 input ENUM_SIM_NAO             encerrarOperacaoHilo = sim;                              // [09] Encerrar operação na virada contrária [SET: 1]
+
+input group                    "---> NEXUS ZONAS"
+input ENUM_TENDENCIA           tendenciaNexusZonas = a_favor_da_tendencia;             // [00] Tendência
+input ENUM_CONFIRMACAO         confirmacaoNexusZonas = com_confirmacao;                // [01] Confirmar sinal no fechamento
+
+input group                    "---> VPRANGE (VOLUME PROFILE)"
+input ENUM_TENDENCIA           tendenciaVPRange = a_favor_da_tendencia;                // [00] Tendência
+input ENUM_CONFIRMACAO         confirmacaoVPRange = com_confirmacao;                   // [01] Confirmar sinal no fechamento
+
+input group                    "---> SUPPORT RESISTANCE REJECTION PRO"
+input ENUM_TENDENCIA           tendenciaSRRejection = a_favor_da_tendencia;            // [00] Tendência
+input ENUM_CONFIRMACAO         confirmacaoSRRejection = com_confirmacao;               // [01] Confirmar sinal no fechamento
+
+input group                    "---> SHOWTRADES [VISUAL]"
+input ENUM_HAB                 exibirShowTrades = Ligado;                              // [00] Exibir indicador de negociações no gráfico
 
 input group                    "---> BREAKEVEN"
 input double                   Break_Even_Start = 230.0;                                 // [00] Breakeven Start ["0" ➝ não usar]
@@ -390,6 +412,10 @@ int                            handleMM02 = INVALID_HANDLE;
 int                            handleAfastamento = INVALID_HANDLE;
 int                            handleHiLoHigh = INVALID_HANDLE;
 int                            handleHiLoLow = INVALID_HANDLE;
+int                            handleNexusZonas = INVALID_HANDLE;
+int                            handleVPRange = INVALID_HANDLE;
+int                            handleSRRejection = INVALID_HANDLE;
+int                            handleShowTrades = INVALID_HANDLE;
 double                         bufferBBSuperior[];
 double                         bufferBBInferior[];
 double                         bufferMM01[];
@@ -399,6 +425,12 @@ double                         bufferAfastamentoSuperior[];
 double                         bufferAfastamentoInferior[];
 double                         bufferHiLoHigh[];
 double                         bufferHiLoLow[];
+double                         bufferNexusZonasCompra[];
+double                         bufferNexusZonasVenda[];
+double                         bufferVPRangeCompra[];
+double                         bufferVPRangeVenda[];
+double                         bufferSRRejectionCompra[];
+double                         bufferSRRejectionVenda[];
 CAppDialog                     m_panel;
 CLabel                         m_Texto01;
 CLabel                         m_Texto02;
@@ -773,6 +805,89 @@ int OnInit()
       }
    }
 
+//+------------------------------------------------------------------+
+//| CRIAÇÃO DO INDICADOR NEXUS ZONAS                                 |
+//| ATENÇÃO: indicador de terceiros, carregado com os parâmetros     |
+//| padrão dele (não expostos como input do robô). Os buffers 0/1    |
+//| são lidos pela CONVENÇÃO 0=seta de compra / 1=seta de venda -    |
+//| não confirmada com o código-fonte do indicador. Valide no        |
+//| gráfico antes de operar em conta real.                           |
+//+------------------------------------------------------------------+
+
+   if(estrategia == estrategia_nexus_zonas)
+   {
+      handleNexusZonas = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "::Indicators\\Nexus_Zonas_11.ex5");
+      if(handleNexusZonas == INVALID_HANDLE)
+      {
+         PrintFormat("Robot -> Falha ao criar o identificador do indicador NEXUS ZONAS para o símbolo %s/%s, erro código %d",
+                     Symbol(),
+                     EnumToString(ENUM_TIMEFRAMES(tempoGrafico)),
+                     GetLastError());
+         if(!posiAberta) return(INIT_FAILED);
+      }
+
+      if(!ArraySetAsSeries(bufferNexusZonasCompra, true)){Print("Robot -> Falha no ArraySetAsSeries do indicador NEXUS ZONAS", GetLastError()); if(!posiAberta) return(INIT_FAILED);}
+      if(!ArraySetAsSeries(bufferNexusZonasVenda, true)){Print("Robot -> Falha no ArraySetAsSeries do indicador NEXUS ZONAS", GetLastError()); if(!posiAberta) return(INIT_FAILED);}
+   }
+
+//+------------------------------------------------------------------+
+//| CRIAÇÃO DO INDICADOR VPRANGE (VOLUME PROFILE)                    |
+//| ATENÇÃO: mesma ressalva do NEXUS ZONAS acima.                    |
+//+------------------------------------------------------------------+
+
+   if(estrategia == estrategia_vprange)
+   {
+      handleVPRange = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "::Indicators\\VPRangev6.ex5");
+      if(handleVPRange == INVALID_HANDLE)
+      {
+         PrintFormat("Robot -> Falha ao criar o identificador do indicador VPRANGE para o símbolo %s/%s, erro código %d",
+                     Symbol(),
+                     EnumToString(ENUM_TIMEFRAMES(tempoGrafico)),
+                     GetLastError());
+         if(!posiAberta) return(INIT_FAILED);
+      }
+
+      if(!ArraySetAsSeries(bufferVPRangeCompra, true)){Print("Robot -> Falha no ArraySetAsSeries do indicador VPRANGE", GetLastError()); if(!posiAberta) return(INIT_FAILED);}
+      if(!ArraySetAsSeries(bufferVPRangeVenda, true)){Print("Robot -> Falha no ArraySetAsSeries do indicador VPRANGE", GetLastError()); if(!posiAberta) return(INIT_FAILED);}
+   }
+
+//+------------------------------------------------------------------+
+//| CRIAÇÃO DO INDICADOR SUPPORT RESISTANCE REJECTION PRO            |
+//| ATENÇÃO: mesma ressalva do NEXUS ZONAS acima.                    |
+//+------------------------------------------------------------------+
+
+   if(estrategia == estrategia_sr_rejection)
+   {
+      handleSRRejection = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "::Indicators\\SupportResistanceRejectionPro.ex5");
+      if(handleSRRejection == INVALID_HANDLE)
+      {
+         PrintFormat("Robot -> Falha ao criar o identificador do indicador SUPPORT RESISTANCE REJECTION PRO para o símbolo %s/%s, erro código %d",
+                     Symbol(),
+                     EnumToString(ENUM_TIMEFRAMES(tempoGrafico)),
+                     GetLastError());
+         if(!posiAberta) return(INIT_FAILED);
+      }
+
+      if(!ArraySetAsSeries(bufferSRRejectionCompra, true)){Print("Robot -> Falha no ArraySetAsSeries do indicador SUPPORT RESISTANCE REJECTION PRO", GetLastError()); if(!posiAberta) return(INIT_FAILED);}
+      if(!ArraySetAsSeries(bufferSRRejectionVenda, true)){Print("Robot -> Falha no ArraySetAsSeries do indicador SUPPORT RESISTANCE REJECTION PRO", GetLastError()); if(!posiAberta) return(INIT_FAILED);}
+   }
+
+//+------------------------------------------------------------------+
+//| CRIAÇÃO DO INDICADOR SHOWTRADES [VISUAL]                         |
+//| Só desenha o histórico de negociações no gráfico, independente   |
+//| da estratégia escolhida - não é lido pelo robô.                  |
+//+------------------------------------------------------------------+
+
+   if(exibirShowTrades == Ligado)
+   {
+      handleShowTrades = iCustom(_Symbol, ENUM_TIMEFRAMES(tempoGrafico), "::Indicators\\ShowTrades.ex5");
+      if(handleShowTrades == INVALID_HANDLE)
+         PrintFormat("Robot -> Falha ao criar o identificador do indicador SHOWTRADES para o símbolo %s/%s, erro código %d",
+                     Symbol(),
+                     EnumToString(ENUM_TIMEFRAMES(tempoGrafico)),
+                     GetLastError());
+   }
+
 //+------------------------------------------------z-----------------+
 //| ADICIONAR INDICADOR NO GRÁFICO                                   |
 //+------------------------------------------------------------------+
@@ -807,6 +922,38 @@ int OnInit()
    {
       if(!ChartIndicatorAdd(0,0,handleAfastamento))
         PrintFormat("Robot -> Falha ao adicionar o indicador AFASTAMENTO DE MÉDIA %d na janela do gráfico. Código de erro %d", GetLastError());
+   }
+
+   //---
+
+   if(estrategia == estrategia_nexus_zonas)
+   {
+      if(!ChartIndicatorAdd(0,0,handleNexusZonas))
+        PrintFormat("Robot -> Falha ao adicionar o indicador NEXUS ZONAS %d na janela do gráfico. Código de erro %d", GetLastError());
+   }
+
+   //---
+
+   if(estrategia == estrategia_vprange)
+   {
+      if(!ChartIndicatorAdd(0,0,handleVPRange))
+        PrintFormat("Robot -> Falha ao adicionar o indicador VPRANGE %d na janela do gráfico. Código de erro %d", GetLastError());
+   }
+
+   //---
+
+   if(estrategia == estrategia_sr_rejection)
+   {
+      if(!ChartIndicatorAdd(0,0,handleSRRejection))
+        PrintFormat("Robot -> Falha ao adicionar o indicador SUPPORT RESISTANCE REJECTION PRO %d na janela do gráfico. Código de erro %d", GetLastError());
+   }
+
+   //---
+
+   if(exibirShowTrades == Ligado && handleShowTrades != INVALID_HANDLE)
+   {
+      if(!ChartIndicatorAdd(0,0,handleShowTrades))
+        PrintFormat("Robot -> Falha ao adicionar o indicador SHOWTRADES %d na janela do gráfico. Código de erro %d", GetLastError());
    }
 
 //+------------------------------------------------------------------+
@@ -1167,6 +1314,10 @@ void OnDeinit(const int reason)
   IndicatorRelease(handleAfastamento);
   IndicatorRelease(handleHiLoHigh);
   IndicatorRelease(handleHiLoLow);
+  IndicatorRelease(handleNexusZonas);
+  IndicatorRelease(handleVPRange);
+  IndicatorRelease(handleSRRejection);
+  IndicatorRelease(handleShowTrades);
 
 //+------------------------------------------------------------------+
 //| LIMPA OS BUFFERS DA MEMÓRIA                                      |
@@ -1181,6 +1332,12 @@ void OnDeinit(const int reason)
   ArrayFree(bufferAfastamentoInferior);
   ArrayFree(bufferHiLoHigh);
   ArrayFree(bufferHiLoLow);
+  ArrayFree(bufferNexusZonasCompra);
+  ArrayFree(bufferNexusZonasVenda);
+  ArrayFree(bufferVPRangeCompra);
+  ArrayFree(bufferVPRangeVenda);
+  ArrayFree(bufferSRRejectionCompra);
+  ArrayFree(bufferSRRejectionVenda);
 
 //+------------------------------------------------------------------+
 //| DELETA OS BOTÕES DO PAINEL                                       |
@@ -1724,6 +1881,36 @@ void OnTick()
         if((confirmacaoHiLo == sem_confirmacao) || (confirmacaoHiLo == com_confirmacao && novaBarra))
         if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
           funcaoComprasEVendasHiLo();
+
+      //+------------------------------------------------------------------+
+      //| ENTRADAS DE COMPRA E DE VENDA - NEXUS ZONAS                      |
+      //+------------------------------------------------------------------+
+
+        if(estrategia == estrategia_nexus_zonas)
+        if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
+        if((confirmacaoNexusZonas == sem_confirmacao) || (confirmacaoNexusZonas == com_confirmacao && novaBarra))
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+          funcaoComprasEVendasNexusZonas();
+
+      //+------------------------------------------------------------------+
+      //| ENTRADAS DE COMPRA E DE VENDA - VPRANGE                          |
+      //+------------------------------------------------------------------+
+
+        if(estrategia == estrategia_vprange)
+        if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
+        if((confirmacaoVPRange == sem_confirmacao) || (confirmacaoVPRange == com_confirmacao && novaBarra))
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+          funcaoComprasEVendasVPRange();
+
+      //+------------------------------------------------------------------+
+      //| ENTRADAS DE COMPRA E DE VENDA - SUPPORT RESISTANCE REJECTION PRO |
+      //+------------------------------------------------------------------+
+
+        if(estrategia == estrategia_sr_rejection)
+        if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
+        if((confirmacaoSRRejection == sem_confirmacao) || (confirmacaoSRRejection == com_confirmacao && novaBarra))
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+          funcaoComprasEVendasSRRejection();
 
 /********************************************************************/
 //+------------------------------------------------------------------+
@@ -2366,6 +2553,152 @@ void OnTick()
       }
    }
 
+//+------------------------------------------------------------------+
+//| FUNÇÃO DE COMPRAS E VENDAS - NEXUS ZONAS                         |
+//| ATENÇÃO: indicador de terceiros (.ex5 compilado, sem fonte       |
+//| disponível). O sinal usa a CONVENÇÃO buffer 0 = seta de compra / |
+//| buffer 1 = seta de venda (valor != EMPTY_VALUE na barra fechada  |
+//| = sinal). Essa convenção NÃO foi confirmada com o autor do       |
+//| indicador - valide visualmente no gráfico antes de usar em conta |
+//| real.                                                             |
+//+------------------------------------------------------------------+
+
+   void funcaoComprasEVendasNexusZonas()
+   {
+      CoppyBuffer();
+
+      int idx = (confirmacaoNexusZonas == com_confirmacao) ? 1 : 0;
+
+      if(ArraySize(bufferNexusZonasCompra) <= idx || ArraySize(bufferNexusZonasVenda) <= idx)
+         return;
+
+      HLinhaDeletar("SL"+_Symbol+string(m_magic));
+      HLinhaDeletar("TP"+_Symbol+string(m_magic));
+      HLinhaDeletar("Entrada"+_Symbol+string(m_magic));
+      HLinhaDeletar("BE"+_Symbol+string(m_magic));
+      HLinhaDeletar("TS"+_Symbol+string(m_magic));
+
+      bool sinalCompra = (bufferNexusZonasCompra[idx] != EMPTY_VALUE && bufferNexusZonasCompra[idx] != 0.0);
+      bool sinalVenda  = (bufferNexusZonasVenda[idx]  != EMPTY_VALUE && bufferNexusZonasVenda[idx]  != 0.0);
+
+      if((tendenciaNexusZonas == a_favor_da_tendencia && sinalCompra) || (tendenciaNexusZonas == contra_a_tendencia && sinalVenda))
+      {
+         double sl = 0.0;
+         double tp = 0.0;
+
+         if(InpStopLoss > 0) sl = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_ASK) - ExtInpStopLoss);
+         if(InpTakeProfit > 0) tp = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_ASK) + ExtInpTakeProfit);
+
+         OpenBuy(sl, tp);
+         return;
+      }
+
+      if((tendenciaNexusZonas == a_favor_da_tendencia && sinalVenda) || (tendenciaNexusZonas == contra_a_tendencia && sinalCompra))
+      {
+         double sl = 0.0;
+         double tp = 0.0;
+
+         if(InpStopLoss > 0) sl = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_BID) + ExtInpStopLoss);
+         if(InpTakeProfit > 0) tp = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_BID) - ExtInpTakeProfit);
+
+         OpenSell(sl, tp);
+      }
+   }
+
+//+------------------------------------------------------------------+
+//| FUNÇÃO DE COMPRAS E VENDAS - VPRANGE (VOLUME PROFILE)            |
+//| ATENÇÃO: mesma ressalva da função NEXUS ZONAS acima.             |
+//+------------------------------------------------------------------+
+
+   void funcaoComprasEVendasVPRange()
+   {
+      CoppyBuffer();
+
+      int idx = (confirmacaoVPRange == com_confirmacao) ? 1 : 0;
+
+      if(ArraySize(bufferVPRangeCompra) <= idx || ArraySize(bufferVPRangeVenda) <= idx)
+         return;
+
+      HLinhaDeletar("SL"+_Symbol+string(m_magic));
+      HLinhaDeletar("TP"+_Symbol+string(m_magic));
+      HLinhaDeletar("Entrada"+_Symbol+string(m_magic));
+      HLinhaDeletar("BE"+_Symbol+string(m_magic));
+      HLinhaDeletar("TS"+_Symbol+string(m_magic));
+
+      bool sinalCompra = (bufferVPRangeCompra[idx] != EMPTY_VALUE && bufferVPRangeCompra[idx] != 0.0);
+      bool sinalVenda  = (bufferVPRangeVenda[idx]  != EMPTY_VALUE && bufferVPRangeVenda[idx]  != 0.0);
+
+      if((tendenciaVPRange == a_favor_da_tendencia && sinalCompra) || (tendenciaVPRange == contra_a_tendencia && sinalVenda))
+      {
+         double sl = 0.0;
+         double tp = 0.0;
+
+         if(InpStopLoss > 0) sl = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_ASK) - ExtInpStopLoss);
+         if(InpTakeProfit > 0) tp = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_ASK) + ExtInpTakeProfit);
+
+         OpenBuy(sl, tp);
+         return;
+      }
+
+      if((tendenciaVPRange == a_favor_da_tendencia && sinalVenda) || (tendenciaVPRange == contra_a_tendencia && sinalCompra))
+      {
+         double sl = 0.0;
+         double tp = 0.0;
+
+         if(InpStopLoss > 0) sl = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_BID) + ExtInpStopLoss);
+         if(InpTakeProfit > 0) tp = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_BID) - ExtInpTakeProfit);
+
+         OpenSell(sl, tp);
+      }
+   }
+
+//+------------------------------------------------------------------+
+//| FUNÇÃO DE COMPRAS E VENDAS - SUPPORT RESISTANCE REJECTION PRO    |
+//| ATENÇÃO: mesma ressalva da função NEXUS ZONAS acima.             |
+//+------------------------------------------------------------------+
+
+   void funcaoComprasEVendasSRRejection()
+   {
+      CoppyBuffer();
+
+      int idx = (confirmacaoSRRejection == com_confirmacao) ? 1 : 0;
+
+      if(ArraySize(bufferSRRejectionCompra) <= idx || ArraySize(bufferSRRejectionVenda) <= idx)
+         return;
+
+      HLinhaDeletar("SL"+_Symbol+string(m_magic));
+      HLinhaDeletar("TP"+_Symbol+string(m_magic));
+      HLinhaDeletar("Entrada"+_Symbol+string(m_magic));
+      HLinhaDeletar("BE"+_Symbol+string(m_magic));
+      HLinhaDeletar("TS"+_Symbol+string(m_magic));
+
+      bool sinalCompra = (bufferSRRejectionCompra[idx] != EMPTY_VALUE && bufferSRRejectionCompra[idx] != 0.0);
+      bool sinalVenda  = (bufferSRRejectionVenda[idx]  != EMPTY_VALUE && bufferSRRejectionVenda[idx]  != 0.0);
+
+      if((tendenciaSRRejection == a_favor_da_tendencia && sinalCompra) || (tendenciaSRRejection == contra_a_tendencia && sinalVenda))
+      {
+         double sl = 0.0;
+         double tp = 0.0;
+
+         if(InpStopLoss > 0) sl = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_ASK) - ExtInpStopLoss);
+         if(InpTakeProfit > 0) tp = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_ASK) + ExtInpTakeProfit);
+
+         OpenBuy(sl, tp);
+         return;
+      }
+
+      if((tendenciaSRRejection == a_favor_da_tendencia && sinalVenda) || (tendenciaSRRejection == contra_a_tendencia && sinalCompra))
+      {
+         double sl = 0.0;
+         double tp = 0.0;
+
+         if(InpStopLoss > 0) sl = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_BID) + ExtInpStopLoss);
+         if(InpTakeProfit > 0) tp = m_symbol.NormalizePrice(SymbolInfoDouble(_Symbol, SYMBOL_BID) - ExtInpTakeProfit);
+
+         OpenSell(sl, tp);
+      }
+   }
+
 
 //+------------------------------------------------------------------+
 //| LIMPA OBJETOS VISUAIS DO HILO                                   |
@@ -2577,6 +2910,69 @@ void OnTick()
         if(CopyBuffer(handleHiLoLow, 0, 0, 3, bufferHiLoLow)<0)
         {
           Print("Robot -> Erro ao copiar dados do indicador HILO (Mínimas): ",GetLastError());
+          return;
+        }
+     }
+
+   //+------------------------------------------------------------------+
+   //| COPPYBUFFER DO INDICADOR NEXUS ZONAS                             |
+   //+------------------------------------------------------------------+
+
+     if(estrategia == estrategia_nexus_zonas)
+     {
+        if(CopyBuffer(handleNexusZonas, 0, 0, 3, bufferNexusZonasCompra)<0)
+        {
+          Print("Robot -> Erro ao copiar dados do indicador NEXUS ZONAS: ",GetLastError());
+          return;
+        }
+
+        //---
+
+        if(CopyBuffer(handleNexusZonas, 1, 0, 3, bufferNexusZonasVenda)<0)
+        {
+          Print("Robot -> Erro ao copiar dados do indicador NEXUS ZONAS: ",GetLastError());
+          return;
+        }
+     }
+
+   //+------------------------------------------------------------------+
+   //| COPPYBUFFER DO INDICADOR VPRANGE (VOLUME PROFILE)                |
+   //+------------------------------------------------------------------+
+
+     if(estrategia == estrategia_vprange)
+     {
+        if(CopyBuffer(handleVPRange, 0, 0, 3, bufferVPRangeCompra)<0)
+        {
+          Print("Robot -> Erro ao copiar dados do indicador VPRANGE: ",GetLastError());
+          return;
+        }
+
+        //---
+
+        if(CopyBuffer(handleVPRange, 1, 0, 3, bufferVPRangeVenda)<0)
+        {
+          Print("Robot -> Erro ao copiar dados do indicador VPRANGE: ",GetLastError());
+          return;
+        }
+     }
+
+   //+------------------------------------------------------------------+
+   //| COPPYBUFFER DO INDICADOR SUPPORT RESISTANCE REJECTION PRO        |
+   //+------------------------------------------------------------------+
+
+     if(estrategia == estrategia_sr_rejection)
+     {
+        if(CopyBuffer(handleSRRejection, 0, 0, 3, bufferSRRejectionCompra)<0)
+        {
+          Print("Robot -> Erro ao copiar dados do indicador SUPPORT RESISTANCE REJECTION PRO: ",GetLastError());
+          return;
+        }
+
+        //---
+
+        if(CopyBuffer(handleSRRejection, 1, 0, 3, bufferSRRejectionVenda)<0)
+        {
+          Print("Robot -> Erro ao copiar dados do indicador SUPPORT RESISTANCE REJECTION PRO: ",GetLastError());
           return;
         }
      }
