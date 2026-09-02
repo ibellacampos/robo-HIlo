@@ -212,6 +212,12 @@ input ENUM_HAB                 escolheHabilitarRelogio = Ligado;                
 input string                   hora_inicio = "09:35";                                  // [01] Horário de Início das Entradas
 input string                   hora_fim = "17:28";                                     // [02] Horário de Encerramento das Entradas
 input string                   hora_zeragem = "17:30";                                 // [03] Horário de Zeragem
+input string                   config03;                                               // ---> FILTRO DE DIAS DA SEMANA
+input ENUM_HAB                 operarSegunda = Ligado;                                 // [00] Operar na Segunda-Feira
+input ENUM_HAB                 operarTerca = Ligado;                                   // [01] Operar na Terça-Feira
+input ENUM_HAB                 operarQuarta = Ligado;                                  // [02] Operar na Quarta-Feira
+input ENUM_HAB                 operarQuinta = Ligado;                                  // [03] Operar na Quinta-Feira
+input ENUM_HAB                 operarSexta = Ligado;                                   // [04] Operar na Sexta-Feira
 
 input group                    "---> PRICE ACTION"
 input ENUM_TENDENCIA           tendenciaPriceAction = a_favor_da_tendencia;            // [00] Tendência
@@ -359,6 +365,7 @@ input int                      alturaBotaoResetar = 320;                        
 
 string                         hoje = "";
 datetime                       hora_atual = 0;
+bool                           diaDaSemanaPermitido = true;
 double                         meta_batida = 0.0;
 MqlRates                       candle[];
 MqlRates                       candleSemana[];
@@ -1545,6 +1552,23 @@ void OnTick()
       hora_atual = TimeCurrent();
 
    //+------------------------------------------------------------------+
+   //| FILTRO DE DIAS DA SEMANA                                         |
+   //+------------------------------------------------------------------+
+
+      MqlDateTime diaSemanaAtual;
+      TimeToStruct(hora_atual, diaSemanaAtual);
+
+      switch(diaSemanaAtual.day_of_week)
+      {
+         case 1: diaDaSemanaPermitido = (operarSegunda == Ligado); break;
+         case 2: diaDaSemanaPermitido = (operarTerca == Ligado);   break;
+         case 3: diaDaSemanaPermitido = (operarQuarta == Ligado);  break;
+         case 4: diaDaSemanaPermitido = (operarQuinta == Ligado);  break;
+         case 5: diaDaSemanaPermitido = (operarSexta == Ligado);   break;
+         default: diaDaSemanaPermitido = false;
+      }
+
+   //+------------------------------------------------------------------+
    //| VARIÁVEIS GLOBAIS                                                |
    //+------------------------------------------------------------------+
 
@@ -1832,7 +1856,7 @@ void OnTick()
 
         if(estrategia == estrategia_bb)
         if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
-        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && diaDaSemanaPermitido && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
           funcaoComprasEVendasBB();
 
       //+------------------------------------------------------------------+
@@ -1842,7 +1866,7 @@ void OnTick()
         if(estrategia == estrategia_cruzamento_de_medias)
         if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
         if((confirmacaoCM == sem_confirmacao) || (confirmacaoCM == com_confirmacao && novaBarra))
-        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && diaDaSemanaPermitido && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
           funcaoComprasEVendasCM();
 
       //+------------------------------------------------------------------+
@@ -1851,7 +1875,7 @@ void OnTick()
 
         if(estrategia == estrategia_afastamento_de_media)
         if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
-        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && diaDaSemanaPermitido && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
           funcaoComprasEVendasAfastamento();
 
       //+------------------------------------------------------------------+
@@ -1860,7 +1884,7 @@ void OnTick()
 
         if(estrategia == estrategia_price_action)
         if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
-        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && diaDaSemanaPermitido && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
           funcaoComprasEVendasPA();
 
       //+------------------------------------------------------------------+
@@ -1880,7 +1904,7 @@ void OnTick()
         if(estrategia == estrategia_virada_hilo)
         if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
         if((confirmacaoHiLo == sem_confirmacao) || (confirmacaoHiLo == com_confirmacao && novaBarra))
-        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && diaDaSemanaPermitido && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
           funcaoComprasEVendasHiLo();
 
       //+------------------------------------------------------------------+
@@ -1890,7 +1914,7 @@ void OnTick()
         if(estrategia == estrategia_nexus_zonas)
         if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
         if((confirmacaoNexusZonas == sem_confirmacao) || (confirmacaoNexusZonas == com_confirmacao && novaBarra))
-        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && diaDaSemanaPermitido && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
           funcaoComprasEVendasNexusZonas();
 
       //+------------------------------------------------------------------+
@@ -1900,7 +1924,7 @@ void OnTick()
         if(estrategia == estrategia_vprange)
         if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
         if((confirmacaoVPRange == sem_confirmacao) || (confirmacaoVPRange == com_confirmacao && novaBarra))
-        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && diaDaSemanaPermitido && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
           funcaoComprasEVendasVPRange();
 
       //+------------------------------------------------------------------+
@@ -1910,7 +1934,7 @@ void OnTick()
         if(estrategia == estrategia_sr_rejection)
         if((quantidadeDeTrades < tradesPorDia && tradesPorDia > 0) || (tradesPorDia == 0))
         if((confirmacaoSRRejection == sem_confirmacao) || (confirmacaoSRRejection == com_confirmacao && novaBarra))
-        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
+        if(((escolheHabilitarRelogio == Ligado && hora_atual>=(StringToTime(hoje+" "+hora_inicio)) && hora_atual<=(StringToTime(hoje+" "+hora_fim))) || (escolheHabilitarRelogio == Desligado)) && diaDaSemanaPermitido && meta_batida == 0 && !posicaoAberta && !ordPendente && !candle_operado)
           funcaoComprasEVendasSRRejection();
 
 /********************************************************************/
