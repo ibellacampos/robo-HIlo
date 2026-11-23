@@ -1,0 +1,34 @@
+; EA14_PrecoReativo - B3 / WIN, grafico M1 (conta NETTING ou HEDGING)
+; Valores do video: 10 contratos por entrada, ~70 pts entre entradas, ate 3 entradas.
+; Alvo/stop/movimento sao estimativas (o video nao mostra os parametros). NAO testado.
+; ATENCAO: 3 x 10 = 30 contratos; stop de 300 pts com 30 contratos = ate R$ 1.800 de perda.
+; Comece com Contratos=1 no teste para medir a estrategia.
+NumeroMagico=2025
+PermitirNoTestador=true
+PermitirEmDemo=false
+PermitirEmContaReal=false
+TempoGrafico=1
+PermitirCompras=true
+PermitirVendas=true
+ModoSinal=0||0||1||1||Y
+JanelaVelas=10||5||5||20||Y
+MovimentoMinimoPontos=250||150||50||400||Y
+CorpoMinimoReacao=0.5
+Contratos=1
+EspacamentoGradePontos=70
+NiveisMaximos=3
+AlvoPontos=100||60||20||200||Y
+StopPontos=300
+BaseStop=0
+TrailingInicioPontos=0
+TrailingDistanciaPontos=60
+HoraInicio=09:05
+HoraFim=16:30
+HoraZeragem=17:45
+CiclosMaximosDia=0
+PerdaMaximaDia=600
+GanhoMaximoDia=0
+EsperaAposCicloVelas=2
+DesvioMaximoPontos=20
+ExibirPainel=true
+DesenharNiveis=true

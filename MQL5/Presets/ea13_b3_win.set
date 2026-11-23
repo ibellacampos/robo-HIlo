@@ -1,0 +1,29 @@
+; EA13_EMASnowball - B3 / WIN, grafico M5 (conta NETTING ou HEDGING)
+; Valores tirados das ordens do video: escada 50/125/245 pts, stop 490 pts (amplitude).
+; Contagem e distancia sao estimativas (o video mostra so os valores do momento). NAO testado.
+NumeroMagico=6969
+PermitirNoTestador=true
+PermitirEmDemo=false
+PermitirEmContaReal=false
+TempoGrafico=5
+PermitirCompras=true
+PermitirVendas=true
+PeriodoEMA=20||20||1||20||N
+ContagemVelas=10||5||5||30||Y
+DistanciaEntradaPontos=30||15||15||90||Y
+EsperaAposCicloVelas=3
+ContratosMercado=2
+DistanciasEscada=50,125,245
+ContratosPorDegrau=1
+AmplitudeStopPontos=490||300||50||600||N
+AlvoPontos=200||100||50||300||Y
+BreakEvenPontos=0
+HoraInicio=09:15
+HoraFim=16:30
+HoraZeragem=17:45
+CiclosMaximosDia=3
+PerdaMaximaDia=300
+GanhoMaximoDia=0
+DesvioMaximoPontos=20
+ExibirPainel=true
+DesenharEMA=true
