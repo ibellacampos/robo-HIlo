@@ -896,7 +896,11 @@ int OnInit()
    ultimaBarraProcessada=iTime(_Symbol,PeriodoDosSinais,0);
    prefixo="EA09_ATR_V2_"+IntegerToString(NumeroMagico)+"_";
    painelDisponivel=(ExibirPainel && (!MQLInfoInteger(MQL_TESTER) || MQLInfoInteger(MQL_VISUAL_MODE)));
-   if(painelDisponivel) EventSetTimer(5);
+   if(painelDisponivel)
+   {
+      ChartSetInteger(0,CHART_FOREGROUND,false);   // candles atras do painel
+      EventSetTimer(5);
+   }
    estado=(OperacoesPermitidasPeloAmbiente()?"Pronto para teste":"Entradas bloqueadas neste ambiente");
    Print("EA09 ATR v2.30 inicializado. PERMISSAO=",OperacoesPermitidasPeloAmbiente(),
          ", Testador=",MQLInfoInteger(MQL_TESTER),", Simbolo=",_Symbol,

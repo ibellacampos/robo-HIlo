@@ -23,7 +23,7 @@
 //| o preco anda muito numa direcao so. As protecoes do grupo 06     |
 //| nao existem no video e vem LIGADAS por padrao.                   |
 //+------------------------------------------------------------------+
-#property version   "1.10"
+#property version   "1.11"
 #property description "EA10: grade com cestas de compra e venda. Reconstrucao a partir de parametros vistos em video; nao e o robo original."
 #include <Trade/Trade.mqh>
 
@@ -409,6 +409,16 @@ void AtualizarPainel(const Cesta &c, const Cesta &v)
    ChartRedraw(0);
 }
 
+// Le as cestas e redesenha o painel (usado no OnInit, OnTimer e OnTick).
+void PainelAgora()
+{
+   if(!painelDisponivel) return;
+   Cesta c, v;
+   LerCesta(POSITION_TYPE_BUY,c);
+   LerCesta(POSITION_TYPE_SELL,v);
+   AtualizarPainel(c,v);
+}
+
 void LimparPainel()
 {
    for(int i=ObjectsTotal(0,0,-1)-1;i>=0;i--)
@@ -453,6 +463,14 @@ int OnInit()
    prefixo="EA10_GRADE_"+IntegerToString(NumeroMagico)+"_";
    painelDisponivel=(ExibirPainel && (!MQLInfoInteger(MQL_TESTER) || MQLInfoInteger(MQL_VISUAL_MODE)));
    picoTotal=AccountInfoDouble(ACCOUNT_EQUITY);
+   if(painelDisponivel)
+   {
+      // Candles na frente escondem objetos: coloca o grafico atras do painel.
+      ChartSetInteger(0,CHART_FOREGROUND,false);
+      EventSetTimer(1);   // painel atualiza mesmo sem ticks (mercado fechado)
+      estado=(AmbientePermitido()?"Aguardando primeiro tick":"Bloqueado neste ambiente (veja grupo 01)");
+      PainelAgora();
+   }
    if(MaximoOrdensPorCesta==0 && FatorMultiplicacao>1.0)
       Print("ATENCAO: martingale sem limite de ordens por cesta. Uma tendencia longa pode zerar a conta.");
    PrintFormat("EA10 Grade Hedge iniciado (%s): %s, tipo=%s, lote=%.2f, grade=%d pts, fator=%.2f, alvo cesta=%.2f",
@@ -462,7 +480,14 @@ int OnInit()
 
 void OnDeinit(const int motivo)
 {
-   if(painelDisponivel) LimparPainel();
+   if(painelDisponivel) { EventKillTimer(); LimparPainel(); ChartRedraw(0); }
+}
+
+void OnTimer()
+{
+   AtualizarHistorico();
+   AtualizarDrawdown();
+   PainelAgora();
 }
 
 void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &req,const MqlTradeResult &res)
@@ -484,7 +509,9 @@ double OnTester()
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   if(!AmbientePermitido()) { estado="Bloqueado neste ambiente"; return; }
+   // Painel antes de qualquer retorno, no maximo 1x por segundo.
+   if(painelDisponivel && TimeCurrent()!=ultimoPainel) { ultimoPainel=TimeCurrent(); PainelAgora(); }
+   if(!AmbientePermitido()) { estado="Bloqueado neste ambiente (veja grupo 01)"; return; }
    if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) || !MQLInfoInteger(MQL_TRADE_ALLOWED)) { estado="Algotrading desligado"; return; }
 
    AtualizarHistorico();
@@ -493,9 +520,6 @@ void OnTick()
    Cesta compras, vendas;
    LerCesta(POSITION_TYPE_BUY,compras);
    LerCesta(POSITION_TYPE_SELL,vendas);
-
-   // Painel no maximo 1x por segundo.
-   if(painelDisponivel && TimeCurrent()!=ultimoPainel) { ultimoPainel=TimeCurrent(); AtualizarPainel(compras,vendas); }
 
    // 1) Protecao de patrimonio: desliga o EA de vez.
    double eq=AccountInfoDouble(ACCOUNT_EQUITY);
