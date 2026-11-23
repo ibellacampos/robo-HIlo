@@ -1,0 +1,29 @@
+; EA09 Rompimento ATR v2.20 - ponto de partida para WIN (mini indice B3)
+; Valores NAO otimizados: servem para iniciar os testes, nao como configuracao final.
+; Teste com deposito realista (ex.: 10000) e "Todos os ticks com base em ticks reais".
+PermitirNoTestador=true
+PeriodoDosSinais=5
+BarrasDeReferencia=6
+ExcessoRompimentoATR=0.1
+ExigirCandleNaDirecao=true
+HabilitarFiltroEMA=true
+PeriodoEMA=50
+UsarLotePorRisco=false
+LoteFixo=1
+ModoStopAlvo=0
+StopMultiploATR=1.5
+AlvoMultiploATR=2.5
+HoraInicioServidor=9
+MinutoInicioServidor=15
+HoraFimServidor=17
+MinutoFimServidor=0
+EncerrarNoHorario=true
+HoraEncerramento=17
+MinutoEncerramento=45
+ExigirCanalDoMesmoDia=true
+PerdasSeguidasMaximasDia=3
+BarrasEsperaAposStop=2
+RebaixamentoMaximoPct=30
+StopMinimoPontos=150
+StopMaximoPontos=600
+RiscoMaximoLoteFixoPct=2

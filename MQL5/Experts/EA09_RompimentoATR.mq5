@@ -4,6 +4,15 @@
 //| IMPORTANTE: prototipo. Estrategia NAO extraida do video.         |
 //| Compilacao e backtest no MetaEditor/MT5 sao necessarios.         |
 //+------------------------------------------------------------------+
+//| Alteracoes v2.20 (apos backtest WIN$ M1, 9 perdas seguidas):      |
+//|  - Horario com minutos + zeragem diaria (day trade B3).           |
+//|  - Canal so com barras do mesmo dia (ignora gap de abertura).     |
+//|  - Espera N barras apos um stop (evita reentrada imediata).       |
+//|  - Limite de perdas seguidas no dia.                              |
+//|  - Stop minimo/maximo em pontos para o stop por ATR.              |
+//|  - Trava de rebaixamento maximo (% do pico do patrimonio).        |
+//|  - Limite de risco do lote fixo (% do patrimonio por operacao).   |
+//|  - Diario mostra o risco em dinheiro e % de cada entrada.         |
 //| Alteracoes v2.10 (em relacao a v2.00):                            |
 //|  - Barra so e marcada como processada quando ATR/EMA/candles      |
 //|    estao prontos (antes o sinal da barra era perdido).            |
@@ -17,7 +26,7 @@
 //|  - Painel atualizado tambem quando o sinal e bloqueado.           |
 //|  - OnTester com criterio personalizado para otimizacao.           |
 //+------------------------------------------------------------------+
-#property version   "2.10"
+#property version   "2.20"
 #property description "EA 09: prototipo de rompimento por ATR, com diagnosticos e painel em portugues. Nao e copia verificada do video."
 #include <Trade/Trade.mqh>
 
@@ -58,28 +67,44 @@ input double AlvoMultiploATR = 2.50;         // Distancia do TP em ATRs
 input int StopLossPontos = 300;              // Usado somente se ModoStopAlvo = pontos
 input int TakeProfitPontos = 600;            // Usado somente se ModoStopAlvo = pontos
 
-input group "04 - FILTROS E LIMITES"
+input group "04 - HORARIO E SESSAO (padrao: B3 day trade)"
+input int HoraInicioServidor = 9;            // Inicio das entradas (hora). Inicio = fim -> 24 horas
+input int MinutoInicioServidor = 15;         // Inicio das entradas (minuto); evita o leilao/abertura
+input int HoraFimServidor = 17;              // Fim das entradas (hora, exclusivo)
+input int MinutoFimServidor = 0;             // Fim das entradas (minuto)
+input bool EncerrarNoHorario = true;         // Zera posicoes deste EA no horario abaixo
+input int HoraEncerramento = 17;             // Hora da zeragem diaria
+input int MinutoEncerramento = 45;           // Minuto da zeragem diaria
+input bool ExigirCanalDoMesmoDia = true;     // Ignora sinal se o canal usa barras do dia anterior (gap)
+
+input group "05 - FILTROS E LIMITES"
 input int SpreadMaximoPontos = 0;            // 0 desliga o filtro de spread
-input int HoraInicioServidor = 0;            // 0 com hora final 0 = 24 horas
-input int HoraFimServidor = 0;               // Hora fim exclusiva
 input int OperacoesMaximasDia = 0;           // 0 sem limite de entradas por dia
+input int PerdasSeguidasMaximasDia = 3;      // Para de operar no dia apos N stops seguidos; 0 desliga
+input int BarrasEsperaAposStop = 2;          // Barras de espera apos saida com perda; 0 desliga
 input double PerdaMaximaDiaMoeda = 0.0;      // 0 desliga limite diario de perda
 input double GanhoMaximoDiaMoeda = 0.0;      // 0 desliga limite diario de ganho
 input bool FecharNoLimiteDiario = true;      // Fecha posicoes deste EA se limite atingido
+input double RebaixamentoMaximoPct = 30.0;   // Desliga o EA se patrimonio cair X% do pico; 0 desliga
 input bool BloquearSeExistePosicaoNoAtivo = true; // Protege contas NETTING
 
-input group "05 - GERENCIAMENTO DE POSICOES"
+input group "06 - LIMITES DO STOP E DO RISCO"
+input int StopMinimoPontos = 0;              // Stop ATR menor que isso e ampliado (alvo proporcional); 0 desliga
+input int StopMaximoPontos = 0;              // Stop ATR maior que isso: entrada ignorada; 0 desliga
+input double RiscoMaximoLoteFixoPct = 0.0;   // Lote fixo: ignora entrada se perda ate o SL > X% do patrimonio; 0 desliga
+
+input group "07 - GERENCIAMENTO DE POSICOES"
 input int BreakEvenInicioPontos = 0;          // 0 desliga break-even
 input int BreakEvenTravaPontos = 0;           // Pontos positivos ao acionar (menor que o inicio)
 input int TrailingInicioPontos = 0;           // 0 desliga trailing stop
 input int TrailingDistanciaPontos = 0;        // 0 desliga trailing stop
 
-input group "06 - PAINEL DE RESULTADOS"
+input group "08 - PAINEL DE RESULTADOS"
 input bool ExibirPainel = true;              // Visivel no grafico ou teste visual
 input int PainelPosicaoX = 12;               // Distancia horizontal
 input int PainelPosicaoY = 16;               // Distancia vertical
 
-input group "07 - OTIMIZACAO (OnTester)"
+input group "09 - OTIMIZACAO (OnTester)"
 input int MinimoOperacoesOtimizacao = 30;    // Abaixo disso o criterio personalizado retorna 0
 
 CTrade negociador;
@@ -109,6 +134,12 @@ double resultadoTotal = 0.0;
 int entradasDia = 0;
 int saidasTotal = 0;
 int saidasPositivas = 0;
+int perdasSeguidasDia = 0;           // stops seguidos hoje (zera com saida positiva)
+datetime ultimaSaidaComPerda = 0;    // horario da ultima saida negativa
+
+// Trava de rebaixamento.
+double picoPatrimonio = 0.0;
+bool bloqueioPorRebaixamento = false;
 
 // Resultado da leitura do sinal.
 #define SINAL_SEM_DADOS  -99   // dados ainda nao prontos: tentar de novo na mesma barra
@@ -150,7 +181,7 @@ bool LerIndicador(const int handle, const int deslocamento, double &valor)
 // Analisa exclusivamente a ultima barra FECHADA (deslocamento=1).
 // O canal e calculado com as N barras anteriores (deslocamentos 2..N+1), sem olhar para o futuro.
 // Retorno: 1 compra, -1 venda, 0 sem sinal, SINAL_SEM_DADOS se dados ainda nao prontos.
-int SinalATR(double &atrUsado, double &referenciaSuperior, double &referenciaInferior)
+int SinalATR(const datetime barraAtual, double &atrUsado, double &referenciaSuperior, double &referenciaInferior)
 {
    atrUsado = 0.0;
    referenciaSuperior = 0.0;
@@ -175,6 +206,19 @@ int SinalATR(double &atrUsado, double &referenciaSuperior, double &referenciaInf
    {
       estado = "Aguardando calculo da EMA";
       return SINAL_SEM_DADOS;
+   }
+
+   // Gap de abertura: se a barra mais antiga do canal for de outro dia, o
+   // "rompimento" e so a diferenca entre o fechamento de ontem e a abertura de hoje.
+   if(ExigirCanalDoMesmoDia)
+   {
+      datetime diaAtual = barraAtual - (barraAtual % 86400);
+      datetime maisAntiga = barras[necessarias-1].time;
+      if(maisAntiga - (maisAntiga % 86400) != diaAtual)
+      {
+         estado = "Canal com barras do dia anterior (gap)";
+         return 0;
+      }
    }
 
    // barras[0] = barra fechada (deslocamento 1); barras[1..N] = referencia.
@@ -234,6 +278,8 @@ bool AtualizarHistorico()
    entradasDia=0;
    saidasTotal=0;
    saidasPositivas=0;
+   perdasSeguidasDia=0;
+   ultimaSaidaComPerda=0;
    int negocios = HistoryDealsTotal();
    for(int i=0; i<negocios; i++)
    {
@@ -257,6 +303,12 @@ bool AtualizarHistorico()
       {
          saidasTotal++;
          if(resultado>0.0) saidasPositivas++;
+         if(resultado<0.0 && quando>ultimaSaidaComPerda) ultimaSaidaComPerda=quando;
+         if(quando>=dia)
+         {
+            if(resultado<0.0) perdasSeguidasDia++;
+            else if(resultado>0.0) perdasSeguidasDia=0;
+         }
       }
    }
    diaDoHistorico = dia;
@@ -305,14 +357,35 @@ bool ExisteQualquerPosicaoNoSimbolo()
    return false;
 }
 
+int MinutoDoDia(const datetime momento)
+{
+   MqlDateTime d;
+   TimeToStruct(momento, d);
+   return d.hour*60 + d.min;
+}
+
+// Janela de entradas [inicio, fim). Inicio = fim -> 24 horas.
 bool DentroDoHorario()
 {
-   if(HoraInicioServidor == HoraFimServidor) return true;
-   MqlDateTime momento;
-   TimeToStruct(TimeCurrent(), momento);
-   if(HoraInicioServidor < HoraFimServidor)
-      return momento.hour >= HoraInicioServidor && momento.hour < HoraFimServidor;
-   return momento.hour >= HoraInicioServidor || momento.hour < HoraFimServidor;
+   int inicio = HoraInicioServidor*60 + MinutoInicioServidor;
+   int fim = HoraFimServidor*60 + MinutoFimServidor;
+   if(inicio == fim) return true;
+   int agora = MinutoDoDia(TimeCurrent());
+   if(inicio < fim) return agora >= inicio && agora < fim;
+   return agora >= inicio || agora < fim;
+}
+
+// Janela de zeragem [encerramento, inicio das entradas). Nela o EA fecha
+// suas posicoes e nao abre novas.
+bool HorarioDeEncerramento()
+{
+   if(!EncerrarNoHorario) return false;
+   int encerramento = HoraEncerramento*60 + MinutoEncerramento;
+   int inicio = HoraInicioServidor*60 + MinutoInicioServidor;
+   if(encerramento == inicio) return false;
+   int agora = MinutoDoDia(TimeCurrent());
+   if(encerramento < inicio) return agora >= encerramento && agora < inicio;
+   return agora >= encerramento || agora < inicio;
 }
 
 double PrecoAjustado(const double preco, const int direcao)
@@ -426,6 +499,21 @@ bool CalcularStops(const int lado, const double atr, const MqlTick &tick,
    double distanciaSL=(ModoStopAlvo==STOP_POR_ATR ? StopMultiploATR*atr : StopLossPontos*_Point);
    double distanciaTP=(ModoStopAlvo==STOP_POR_ATR ? AlvoMultiploATR*atr : TakeProfitPontos*_Point);
    if(distanciaSL<=0 || distanciaTP<=0) {estado="Distancias SL/TP invalidas";return false;}
+   if(ModoStopAlvo==STOP_POR_ATR)
+   {
+      // ATR baixo gera stop curto demais (ruido); amplia SL e TP na mesma proporcao.
+      if(StopMinimoPontos>0 && distanciaSL < StopMinimoPontos*_Point)
+      {
+         double fator = StopMinimoPontos*_Point/distanciaSL;
+         distanciaSL *= fator;
+         distanciaTP *= fator;
+      }
+      if(StopMaximoPontos>0 && distanciaSL > StopMaximoPontos*_Point)
+      {
+         estado=StringFormat("Stop ATR %.0f pts acima do maximo %d",distanciaSL/_Point,StopMaximoPontos);
+         return false;
+      }
+   }
    double passo=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
    if(passo<=0) passo=_Point;
    double minStop=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*_Point+passo;
@@ -482,6 +570,20 @@ bool EnviarOrdem(const int lado, const double atr)
       if(MostrarDiagnosticos) PrintFormat("Lote calculado %.6f, minimo %.6f, passo %.6f",solicitado,SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_MIN),SymbolInfoDouble(_Symbol,SYMBOL_VOLUME_STEP));
       return false;
    }
+   // Risco real da entrada (perda ate o SL), em dinheiro e % do patrimonio.
+   double patrimonio=AccountInfoDouble(ACCOUNT_EQUITY);
+   double perdaAteSL=0.0;
+   double riscoPct=0.0;
+   if(OrderCalcProfit(tipo,_Symbol,lote,entrada,sl,perdaAteSL) && patrimonio>0.0)
+      riscoPct=100.0*MathAbs(perdaAteSL)/patrimonio;
+   if(!UsarLotePorRisco && RiscoMaximoLoteFixoPct>0.0 && riscoPct>RiscoMaximoLoteFixoPct)
+   {
+      estado=StringFormat("Risco %.1f%% > limite %.1f%%",riscoPct,RiscoMaximoLoteFixoPct);
+      if(MostrarDiagnosticos)
+         PrintFormat("Entrada ignorada: perda ate o SL %.2f = %.1f%% do patrimonio (limite %.1f%%)",
+                     MathAbs(perdaAteSL),riscoPct,RiscoMaximoLoteFixoPct);
+      return false;
+   }
    double margem=0.0;
    if(!OrderCalcMargin(tipo,_Symbol,lote,entrada,margem))
    {
@@ -494,7 +596,7 @@ bool EnviarOrdem(const int lado, const double atr)
       return false;
    }
 
-   string comentario="EA09 ATR prototipo v2.10";
+   string comentario="EA09 ATR prototipo v2.20";
    int tentativas=MathMax(1,TentativasDeEnvio);
    uint resposta=0;
    bool enviado=false;
@@ -523,7 +625,8 @@ bool EnviarOrdem(const int lado, const double atr)
    historicoSujo=true;
    estado=(lado>0?"COMPRA executada":"VENDA executada");
    if(MostrarDiagnosticos)
-      PrintFormat("%s: lote %.4f, SL %.5f, TP %.5f, ATR %.6f",estado,lote,sl,tp,atr);
+      PrintFormat("%s: lote %.4f, SL %.5f, TP %.5f, ATR %.6f, risco %.2f (%.1f%% do patrimonio)",
+                  estado,lote,sl,tp,atr,MathAbs(perdaAteSL),riscoPct);
    return true;
 }
 
@@ -562,7 +665,7 @@ void AtualizarPainel()
    ObjectSetInteger(0,fundo,OBJPROP_XDISTANCE,PainelPosicaoX);
    ObjectSetInteger(0,fundo,OBJPROP_YDISTANCE,PainelPosicaoY);
    ObjectSetInteger(0,fundo,OBJPROP_XSIZE,440);
-   ObjectSetInteger(0,fundo,OBJPROP_YSIZE,305);
+   ObjectSetInteger(0,fundo,OBJPROP_YSIZE,325);
    ObjectSetInteger(0,fundo,OBJPROP_BGCOLOR,C'18,27,39');
    ObjectSetInteger(0,fundo,OBJPROP_COLOR,C'52,79,101');
    ObjectSetInteger(0,fundo,OBJPROP_SELECTABLE,false);
@@ -573,7 +676,7 @@ void AtualizarPainel()
    double spread=0;
    if(SymbolInfoTick(_Symbol,tick) && tick.ask>=tick.bid) spread=(tick.ask-tick.bid)/_Point;
    bool permitido=OperacoesPermitidasPeloAmbiente();
-   LinhaPainel(0,"EA 09 | ROMPIMENTO ATR | REVISAO v2.10",clrWhite);
+   LinhaPainel(0,"EA 09 | ROMPIMENTO ATR | REVISAO v2.20",clrWhite);
    LinhaPainel(1,"MODELO PROVISORIO - VIDEO NAO VERIFICADO",C'255,189,84');
    LinhaPainel(2,"Ativo: "+_Symbol+" | Periodo: "+EnumToString(PeriodoDosSinais),C'210,225,240');
    LinhaPainel(3,"Entradas: "+(permitido?"AUTORIZADAS":"BLOQUEADAS"),permitido?clrLime:clrOrange);
@@ -586,7 +689,11 @@ void AtualizarPainel()
    LinhaPainel(10,"Barras: "+IntegerToString(barrasProcessadas)+" | Sinais C/V: "+IntegerToString(sinaisCompra)+"/"+IntegerToString(sinaisVenda),clrWhite);
    LinhaPainel(11,"Ordens enviadas: "+IntegerToString(ordensEnviadas)+" | Rejeitadas: "+IntegerToString(ordensRejeitadas),clrWhite);
    LinhaPainel(12,"Bloqueios por filtro: "+IntegerToString(bloqueiosPorFiltro)+" | Spread: "+DoubleToString(spread,1),clrWhite);
-   LinhaPainel(13,"Estado: "+estado,C'210,225,240');
+   double eq=AccountInfoDouble(ACCOUNT_EQUITY);
+   double ddPico=(picoPatrimonio>0.0?100.0*(picoPatrimonio-eq)/picoPatrimonio:0.0);
+   LinhaPainel(13,"Stops seguidos hoje: "+IntegerToString(perdasSeguidasDia)+" | Queda do pico: "+DoubleToString(MathMax(ddPico,0.0),1)+"%",
+               bloqueioPorRebaixamento?clrTomato:clrWhite);
+   LinhaPainel(14,"Estado: "+estado,C'210,225,240');
    ChartRedraw(0);
 }
 
@@ -607,6 +714,11 @@ int OnInit()
       RiscoPorOperacaoPct<=0.0 || RiscoPorOperacaoPct>100.0 ||
       SpreadMaximoPontos<0 || DesvioMaximoPontos<0 || OperacoesMaximasDia<0 || TentativasDeEnvio<1 ||
       HoraInicioServidor<0 || HoraInicioServidor>23 || HoraFimServidor<0 || HoraFimServidor>23 ||
+      MinutoInicioServidor<0 || MinutoInicioServidor>59 || MinutoFimServidor<0 || MinutoFimServidor>59 ||
+      HoraEncerramento<0 || HoraEncerramento>23 || MinutoEncerramento<0 || MinutoEncerramento>59 ||
+      PerdasSeguidasMaximasDia<0 || BarrasEsperaAposStop<0 ||
+      RebaixamentoMaximoPct<0.0 || RebaixamentoMaximoPct>=100.0 ||
+      StopMinimoPontos<0 || StopMaximoPontos<0 || RiscoMaximoLoteFixoPct<0.0 ||
       PerdaMaximaDiaMoeda<0.0 || GanhoMaximoDiaMoeda<0.0 || MinimoOperacoesOtimizacao<0 ||
       BreakEvenInicioPontos<0 || BreakEvenTravaPontos<0 || TrailingInicioPontos<0 || TrailingDistanciaPontos<0)
       parametrosOk=false;
@@ -615,6 +727,7 @@ int OnInit()
    if(ModoStopAlvo==STOP_POR_PONTOS && (StopLossPontos<=0 || TakeProfitPontos<=0)) parametrosOk=false;
    // Trava do break-even acima do gatilho colocaria o SL do lado errado do preco.
    if(BreakEvenInicioPontos>0 && BreakEvenTravaPontos>=BreakEvenInicioPontos) parametrosOk=false;
+   if(StopMinimoPontos>0 && StopMaximoPontos>0 && StopMinimoPontos>StopMaximoPontos) parametrosOk=false;
    if(!parametrosOk)
    {
       Print("Parametros invalidos. Verifique o grupo correspondente.");
@@ -642,13 +755,15 @@ int OnInit()
          return INIT_FAILED;
       }
    }
+   picoPatrimonio=AccountInfoDouble(ACCOUNT_EQUITY);
+   bloqueioPorRebaixamento=false;
    // Nao entra no meio da barra em andamento ao anexar o EA.
    ultimaBarraProcessada=iTime(_Symbol,PeriodoDosSinais,0);
    prefixo="EA09_ATR_V2_"+IntegerToString(NumeroMagico)+"_";
    painelDisponivel=(ExibirPainel && (!MQLInfoInteger(MQL_TESTER) || MQLInfoInteger(MQL_VISUAL_MODE)));
    if(painelDisponivel) EventSetTimer(5);
    estado=(OperacoesPermitidasPeloAmbiente()?"Pronto para teste":"Entradas bloqueadas neste ambiente");
-   Print("EA09 ATR v2.10 inicializado. PERMISSAO=",OperacoesPermitidasPeloAmbiente(),
+   Print("EA09 ATR v2.20 inicializado. PERMISSAO=",OperacoesPermitidasPeloAmbiente(),
          ", Testador=",MQLInfoInteger(MQL_TESTER),", Simbolo=",_Symbol,
          ", Timeframe=",EnumToString(PeriodoDosSinais),
          ". Estrategia prototipo, NAO extraida do video.");
@@ -662,7 +777,7 @@ void OnDeinit(const int motivo)
    if(handleATR!=INVALID_HANDLE) IndicatorRelease(handleATR);
    if(handleEMA!=INVALID_HANDLE) IndicatorRelease(handleEMA);
    if(painelDisponivel) LimparPainel();
-   PrintFormat("RESUMO EA09 v2.10: barras=%I64d, sinais compra=%I64d, sinais venda=%I64d, ordens=%I64d, rejeicoes=%I64d, bloqueios=%I64d, ultimo estado=%s",
+   PrintFormat("RESUMO EA09 v2.20: barras=%I64d, sinais compra=%I64d, sinais venda=%I64d, ordens=%I64d, rejeicoes=%I64d, bloqueios=%I64d, ultimo estado=%s",
                barrasProcessadas, sinaisCompra, sinaisVenda, ordensEnviadas, ordensRejeitadas, bloqueiosPorFiltro, estado);
 }
 
@@ -703,6 +818,33 @@ void OnTick()
    }
    GerenciarPosicoes();
    if(!AtualizarHistorico()) return;
+   if(QuantidadeDePosicoes()==0) fechamentoLimiteAvisado=false;
+
+   // Trava de rebaixamento: patrimonio caiu X% do maior valor ja visto.
+   double patrimonio=AccountInfoDouble(ACCOUNT_EQUITY);
+   if(patrimonio>picoPatrimonio) picoPatrimonio=patrimonio;
+   if(!bloqueioPorRebaixamento && RebaixamentoMaximoPct>0.0 && picoPatrimonio>0.0 &&
+      patrimonio<=picoPatrimonio*(1.0-RebaixamentoMaximoPct/100.0))
+   {
+      bloqueioPorRebaixamento=true;
+      PrintFormat("TRAVA DE REBAIXAMENTO: patrimonio %.2f caiu %.1f%% do pico %.2f. EA nao abrira novas entradas.",
+                  patrimonio,100.0*(picoPatrimonio-patrimonio)/picoPatrimonio,picoPatrimonio);
+   }
+   if(bloqueioPorRebaixamento)
+   {
+      estado="Desligado: rebaixamento maximo atingido";
+      if(QuantidadeDePosicoes()>0) FecharPosicoesDoEA();
+      return;
+   }
+
+   // Zeragem diaria (day trade): fecha posicoes e nao abre novas ate o proximo inicio.
+   if(HorarioDeEncerramento())
+   {
+      estado="Horario de zeragem: sem novas entradas";
+      if(QuantidadeDePosicoes()>0) FecharPosicoesDoEA();
+      return;
+   }
+
    datetime hoje=InicioDia(TimeCurrent());
    if(diaBloqueado!=0 && diaBloqueado!=hoje)
    {
@@ -728,7 +870,7 @@ void OnTick()
    if(barra==0 || barra==ultimaBarraProcessada) return;
 
    double atr=0.0,superior=0.0,inferior=0.0;
-   int sinal=SinalATR(atr,superior,inferior);
+   int sinal=SinalATR(barra,atr,superior,inferior);
    // Dados ainda nao prontos: NAO consome a barra, tenta de novo no proximo tick.
    if(sinal==SINAL_SEM_DADOS) return;
 
@@ -748,6 +890,11 @@ void OnTick()
       {Bloquear("Ja existe posicao deste robo");return;}
    if(OperacoesMaximasDia>0 && entradasDia>=OperacoesMaximasDia)
       {Bloquear("Limite de entradas do dia");return;}
+   if(PerdasSeguidasMaximasDia>0 && perdasSeguidasDia>=PerdasSeguidasMaximasDia)
+      {Bloquear(StringFormat("%d stops seguidos hoje",perdasSeguidasDia),true);return;}
+   if(BarrasEsperaAposStop>0 && ultimaSaidaComPerda>0 &&
+      (long)(barra-ultimaSaidaComPerda) < (long)BarrasEsperaAposStop*PeriodSeconds(PeriodoDosSinais))
+      {Bloquear("Espera apos stop",true);return;}
    if(!DentroDoHorario())
       {Bloquear("Fora do horario do servidor",true);return;}
    MqlTick tick;
