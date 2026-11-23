@@ -15,11 +15,15 @@
 //|    inteira; ela reabre no tick seguinte.                         |
 //|  - Limites diarios em $, horario de envio e de encerramento.     |
 //|                                                                  |
+//| v1.10: suporte a conta NETTING (B3). Nela so existe uma posicao   |
+//| por ativo, entao opera UMA cesta (somente compra ou somente      |
+//| venda); a grade soma contratos a mesma posicao.                  |
+//|                                                                  |
 //| RISCO: grade com multiplicacao tem curva suave ate o dia em que  |
 //| o preco anda muito numa direcao so. As protecoes do grupo 06     |
 //| nao existem no video e vem LIGADAS por padrao.                   |
 //+------------------------------------------------------------------+
-#property version   "1.00"
+#property version   "1.10"
 #property description "EA10: grade com cestas de compra e venda. Reconstrucao a partir de parametros vistos em video; nao e o robo original."
 #include <Trade/Trade.mqh>
 
@@ -102,6 +106,7 @@ datetime diaDD=0, mesDD=0;
 datetime diaBloqueado=0;
 bool desligadoPorPatrimonio=false;
 datetime ultimoPainel=0;
+bool contaNetting=false;
 
 //+------------------------------------------------------------------+
 bool AmbientePermitido()
@@ -165,6 +170,7 @@ void LerCesta(const ENUM_POSITION_TYPE tipo, Cesta &c)
 {
    c.qtd=0; c.lotes=0; c.lucro=0; c.precoMedio=0; c.precoUltima=0; c.loteUltimo=0;
    long ultimoTempo=-1;
+   long idPosicao=0;
    double somaPrecoLote=0.0;
    for(int i=PositionsTotal()-1; i>=0; i--)
    {
@@ -179,8 +185,33 @@ void LerCesta(const ENUM_POSITION_TYPE tipo, Cesta &c)
       somaPrecoLote+=preco*vol;
       long tempo=PositionGetInteger(POSITION_TIME_MSC);
       if(tempo>ultimoTempo) { ultimoTempo=tempo; c.precoUltima=preco; c.loteUltimo=vol; }
+      if(contaNetting) idPosicao=PositionGetInteger(POSITION_IDENTIFIER);
    }
    if(c.lotes>0) c.precoMedio=somaPrecoLote/c.lotes;
+
+   // NETTING: a posicao unica guarda so o preco medio. Ordens da grade, ultimo
+   // preco e ultimo lote vem dos negocios de entrada dessa posicao.
+   if(contaNetting && c.qtd>0 && idPosicao>0 && HistorySelectByPosition(idPosicao))
+   {
+      int entradas=0;
+      long ultimo=-1;
+      for(int i=0;i<HistoryDealsTotal();i++)
+      {
+         ulong tk=HistoryDealGetTicket(i);
+         if(tk==0) continue;
+         long entrada=HistoryDealGetInteger(tk,DEAL_ENTRY);
+         if(entrada!=DEAL_ENTRY_IN && entrada!=DEAL_ENTRY_INOUT) continue;
+         entradas++;
+         long t=HistoryDealGetInteger(tk,DEAL_TIME_MSC);
+         if(t>ultimo)
+         {
+            ultimo=t;
+            c.precoUltima=HistoryDealGetDouble(tk,DEAL_PRICE);
+            c.loteUltimo=HistoryDealGetDouble(tk,DEAL_VOLUME);
+         }
+      }
+      if(entradas>0) c.qtd=entradas;
+   }
 }
 
 bool FecharCesta(const ENUM_POSITION_TYPE tipo, const string motivo)
@@ -406,12 +437,13 @@ int OnInit()
       Print("Parametros invalidos. LimiteGanhoCesta deve ser > 0 e FatorMultiplicacao entre 1 e 10.");
       return INIT_PARAMETERS_INCORRECT;
    }
-   // Duas cestas independentes so existem em conta HEDGING. Em NETTING (ex.: B3)
-   // a compra e a venda se anulam e a grade nao funciona.
-   if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
+   // Duas cestas simultaneas so existem em conta HEDGING. Em NETTING (B3) a
+   // compra e a venda se anulariam: opera-se um lado so.
+   contaNetting=((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
+   if(contaNetting && TipoTrades==TRADES_AMBOS)
    {
-      Print("ERRO: este EA exige conta HEDGING (forex/CFD). Contas NETTING, como as da B3, nao sao suportadas.");
-      return INIT_FAILED;
+      Print("Conta NETTING (ex.: B3): escolha TipoTrades = Somente compras ou Somente vendas. 'Ambos' exige conta HEDGING.");
+      return INIT_PARAMETERS_INCORRECT;
    }
    negociador.SetExpertMagicNumber((ulong)NumeroMagico);
    negociador.SetDeviationInPoints((ulong)DesvioMaximoPontos);
@@ -423,8 +455,8 @@ int OnInit()
    picoTotal=AccountInfoDouble(ACCOUNT_EQUITY);
    if(MaximoOrdensPorCesta==0 && FatorMultiplicacao>1.0)
       Print("ATENCAO: martingale sem limite de ordens por cesta. Uma tendencia longa pode zerar a conta.");
-   PrintFormat("EA10 Grade Hedge iniciado: %s, tipo=%s, lote=%.2f, grade=%d pts, fator=%.2f, alvo cesta=%.2f",
-               _Symbol,EnumToString(TipoTrades),Lote,DistanciaGradePontos,FatorMultiplicacao,LimiteGanhoCesta);
+   PrintFormat("EA10 Grade Hedge iniciado (%s): %s, tipo=%s, lote=%.2f, grade=%d pts, fator=%.2f, alvo cesta=%.2f",
+               contaNetting?"NETTING":"HEDGING",_Symbol,EnumToString(TipoTrades),Lote,DistanciaGradePontos,FatorMultiplicacao,LimiteGanhoCesta);
    return INIT_SUCCEEDED;
 }
 
