@@ -1,0 +1,28 @@
+; EA11_HiLoScalper - WIN, grafico M1 (valores estimados a partir do video)
+; Alvo/stop deduzidos do painel do video: ~R$24 por acerto e ~R$60 por erro com 2 contratos.
+; Periodo do HiLo NAO aparece no video: 10 e um ponto de partida para otimizar (faixa 5..20).
+NumeroMagico=31220
+PermitirNoTestador=true
+PermitirEmDemo=false
+PermitirEmContaReal=false
+PeriodoDosSinais=1
+Contratos=2
+AlvoPontos=60||40||10||120||N
+StopPontos=150||100||25||250||N
+PermitirCompras=true
+PermitirVendas=true
+MostrarDiagnosticos=true
+PeriodoHiLo=10||5||1||20||Y
+MetodoHiLo=0
+SairNaViradaContraria=false
+HoraInicio=09:15
+HoraFim=17:00
+HoraZeragem=17:45
+GanhoMaximoDia=0
+PerdaMaximaDia=0
+OperacoesMaximasDia=0
+SpreadMaximoPontos=0
+DesvioMaximoPontos=20
+ExibirPainel=true
+DesenharHiLo=true
+BarrasDesenhadas=300
