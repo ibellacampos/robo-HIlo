@@ -212,9 +212,9 @@ int SinalATR(const datetime barraAtual, double &atrUsado, double &referenciaSupe
    // "rompimento" e so a diferenca entre o fechamento de ontem e a abertura de hoje.
    if(ExigirCanalDoMesmoDia)
    {
-      datetime diaAtual = barraAtual - (barraAtual % 86400);
-      datetime maisAntiga = barras[necessarias-1].time;
-      if(maisAntiga - (maisAntiga % 86400) != diaAtual)
+      long diaAtual = (long)barraAtual / 86400;
+      long diaMaisAntiga = (long)barras[necessarias-1].time / 86400;
+      if(diaMaisAntiga != diaAtual)
       {
          estado = "Canal com barras do dia anterior (gap)";
          return 0;
