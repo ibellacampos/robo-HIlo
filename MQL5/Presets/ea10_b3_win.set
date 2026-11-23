@@ -1,31 +1,29 @@
-; EA10_GradeHedge v1.10 - B3 / WIN (mini indice), conta NETTING (ex.: XP)
+; EA10_GradeHedge v2.00 - B3 / WIN (mini indice), conta NETTING (ex.: XP)
 ; Na B3 so existe uma posicao por ativo: opera UM lado por vez.
 ;   TipoTrades=0 -> somente compras | TipoTrades=1 -> somente vendas
-; WIN: 1 ponto = R$ 0,20 por contrato. Valores em $ abaixo sao em R$.
-; Valores iniciais NAO testados. Use deposito realista (>= R$ 10.000) e
-; "Todos os ticks com base em ticks reais".
+; WIN: 1 ponto = R$ 0,20 por contrato. Valores em $ sao em R$.
+; Com a regra do video (lote = volume aberto x fator), fator 1 DOBRA os contratos:
+;   1 -> 1 -> 2 -> 4  (maximo 4 niveis = 8 contratos).
+; Valores iniciais NAO testados.
 NumeroMagico=123
 PermitirNoTestador=true
 PermitirEmDemo=false
 PermitirEmContaReal=false
 MostrarDiagnosticos=true
-; Limites diarios (R$)
 LimiteGanhoDiario=0
 LimitePerdaDiario=400
-; Por cesta (R$): alvo 30 = 150 pts com 1 contrato; stop 300 = 1500 pts
-LimiteGanhoCesta=30
-LimitePerdaCesta=300
-; Pregao B3 (horario de Brasilia no servidor da XP)
+LimiteGanhoTrades=30
+LimitePerdaTrades=300
+ModoSaida=0
 InicioEnvioOrdens=09:15
 TerminoEnvioOrdens=17:00
 HorarioEncerrarTudo=17:45
-; Operacional
 TipoTrades=0
 Lote=1
 DistanciaGradePontos=300
 FatorMultiplicacao=1
-; Protecoes
-MaximoOrdensPorCesta=4
+ModoLote=0
+MaximoOrdensPorLado=4
 LoteMaximo=4
 StopPatrimonioPct=30
 SpreadMaximoPontos=0
