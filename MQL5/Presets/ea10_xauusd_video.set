@@ -1,0 +1,23 @@
+; EA10_GradeHedge - valores vistos no video (XAUUSD, grafico H1)
+; Grupo 06 (protecoes) NAO existe no video: mantido ligado aqui.
+NumeroMagico=123
+PermitirNoTestador=true
+PermitirEmDemo=false
+PermitirEmContaReal=false
+MostrarDiagnosticos=true
+LimiteGanhoDiario=0
+LimitePerdaDiario=0
+LimiteGanhoCesta=5
+LimitePerdaCesta=0
+InicioEnvioOrdens=00:01
+TerminoEnvioOrdens=23:59
+HorarioEncerrarTudo=0
+TipoTrades=2
+Lote=0.01
+DistanciaGradePontos=2000
+FatorMultiplicacao=1
+MaximoOrdensPorCesta=8
+LoteMaximo=0.64
+StopPatrimonioPct=30
+SpreadMaximoPontos=0
+DesvioMaximoPontos=50
