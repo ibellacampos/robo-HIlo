@@ -4,6 +4,11 @@
 //| IMPORTANTE: prototipo. Estrategia NAO extraida do video.         |
 //| Compilacao e backtest no MetaEditor/MT5 sao necessarios.         |
 //+------------------------------------------------------------------+
+//| Alteracoes v2.30 (apos backtest WIN$ out-nov, 129 operacoes):     |
+//|  - Entrada por RETESTE (ordem limitada no nivel rompido), com     |
+//|    cancelamento apos N barras e na zeragem/travas.                |
+//|  - Filtro de tamanho do candle de rompimento (em ATR).            |
+//|  - Filtro ADX opcional (evita rompimento em lateralidade).        |
 //| Alteracoes v2.20 (apos backtest WIN$ M1, 9 perdas seguidas):      |
 //|  - Horario com minutos + zeragem diaria (day trade B3).           |
 //|  - Canal so com barras do mesmo dia (ignora gap de abertura).     |
@@ -26,9 +31,15 @@
 //|  - Painel atualizado tambem quando o sinal e bloqueado.           |
 //|  - OnTester com criterio personalizado para otimizacao.           |
 //+------------------------------------------------------------------+
-#property version   "2.20"
+#property version   "2.30"
 #property description "EA 09: prototipo de rompimento por ATR, com diagnosticos e painel em portugues. Nao e copia verificada do video."
 #include <Trade/Trade.mqh>
+
+enum ENUM_MODO_ENTRADA
+{
+   ENTRADA_MERCADO = 0,    // A mercado no fechamento do candle de rompimento
+   ENTRADA_RETESTE = 1     // Ordem limitada no nivel rompido (reteste)
+};
 
 enum ENUM_TIPO_STOP
 {
@@ -55,6 +66,13 @@ input double ExcessoRompimentoATR = 0.05;     // ATR alem da maxima/minima; 0 = 
 input bool ExigirCandleNaDirecao = true;      // Compra: candle alta; venda: candle baixa
 input bool HabilitarFiltroEMA = false;        // Filtro de tendencia adicional, opcional
 input int PeriodoEMA = 50;                   // Periodos EMA usada no filtro
+input double TamanhoMaximoCandleATR = 0.0;   // Ignora rompimento se amplitude do candle > X ATR; 0 desliga
+input bool HabilitarFiltroADX = false;        // Exige tendencia minima pelo ADX
+input int PeriodoADX = 14;                    // Periodos do ADX
+input double ADXMinimo = 20.0;                // ADX minimo para aceitar o rompimento
+input ENUM_MODO_ENTRADA ModoEntrada = ENTRADA_MERCADO; // Mercado ou reteste do nivel rompido
+input double FolgaRetesteATR = 0.0;           // Reteste: ordem X ATR alem do nivel, no sentido do rompimento
+input int BarrasValidadeReteste = 3;          // Reteste: cancela a ordem pendente apos N barras
 
 input group "03 - LOTE, STOP E ALVO"
 input bool UsarLotePorRisco = false;          // Calcula lote por risco percentual
@@ -110,6 +128,7 @@ input int MinimoOperacoesOtimizacao = 30;    // Abaixo disso o criterio personal
 CTrade negociador;
 int handleATR = INVALID_HANDLE;
 int handleEMA = INVALID_HANDLE;
+int handleADX = INVALID_HANDLE;
 datetime ultimaBarraProcessada = 0;
 datetime diaBloqueado = 0;
 bool fechamentoLimiteAvisado = false;
@@ -207,6 +226,12 @@ int SinalATR(const datetime barraAtual, double &atrUsado, double &referenciaSupe
       estado = "Aguardando calculo da EMA";
       return SINAL_SEM_DADOS;
    }
+   double adx = 0.0;
+   if(HabilitarFiltroADX && !LerIndicador(handleADX, 1, adx))
+   {
+      estado = "Aguardando calculo do ADX";
+      return SINAL_SEM_DADOS;
+   }
 
    // Gap de abertura: se a barra mais antiga do canal for de outro dia, o
    // "rompimento" e so a diferenca entre o fechamento de ontem e a abertura de hoje.
@@ -244,6 +269,21 @@ int SinalATR(const datetime barraAtual, double &atrUsado, double &referenciaSupe
    {
       compra = compra && fechada.close > ema;
       venda  = venda  && fechada.close < ema;
+   }
+   if((compra || venda) && TamanhoMaximoCandleATR>0.0 &&
+      fechada.high - fechada.low > TamanhoMaximoCandleATR*atrUsado)
+   {
+      // Candle esticado: entrada longe do nivel, alta chance de devolucao.
+      estado = StringFormat("Candle de rompimento %.1f ATR (max %.1f)",
+                            (fechada.high-fechada.low)/atrUsado, TamanhoMaximoCandleATR);
+      if(MostrarDiagnosticos) Print("Rompimento ignorado: ", estado);
+      return 0;
+   }
+   if((compra || venda) && HabilitarFiltroADX && adx < ADXMinimo)
+   {
+      estado = StringFormat("ADX %.1f abaixo de %.1f", adx, ADXMinimo);
+      if(MostrarDiagnosticos) Print("Rompimento ignorado: ", estado);
+      return 0;
    }
    if(compra) return 1;
    if(venda) return -1;
@@ -492,8 +532,9 @@ bool RetcodeRepetivel(const uint codigo)
           codigo==TRADE_RETCODE_TIMEOUT;
 }
 
-// Calcula SL/TP a partir do tick atual. Retorna false se ficarem invalidos.
-bool CalcularStops(const int lado, const double atr, const MqlTick &tick,
+// Calcula SL/TP. precoBase = 0: entrada a mercado (tick atual);
+// precoBase > 0: preco da ordem limitada. Retorna false se ficarem invalidos.
+bool CalcularStops(const int lado, const double atr, const MqlTick &tick, const double precoBase,
                    double &entrada, double &sl, double &tp)
 {
    double distanciaSL=(ModoStopAlvo==STOP_POR_ATR ? StopMultiploATR*atr : StopLossPontos*_Point);
@@ -517,16 +558,34 @@ bool CalcularStops(const int lado, const double atr, const MqlTick &tick,
    double passo=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
    if(passo<=0) passo=_Point;
    double minStop=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*_Point+passo;
-   entrada=(lado>0?tick.ask:tick.bid);
-   if(lado>0)
+   if(precoBase>0.0)
    {
-      sl=PrecoAjustado(MathMin(entrada-distanciaSL,tick.bid-minStop),-1);
-      tp=PrecoAjustado(MathMax(entrada+distanciaTP,tick.bid+minStop),1);
+      // Ordem pendente: SL/TP medidos a partir do preco da ordem.
+      entrada=precoBase;
+      if(lado>0)
+      {
+         sl=PrecoAjustado(MathMin(entrada-distanciaSL,entrada-minStop),-1);
+         tp=PrecoAjustado(MathMax(entrada+distanciaTP,entrada+minStop),1);
+      }
+      else
+      {
+         sl=PrecoAjustado(MathMax(entrada+distanciaSL,entrada+minStop),1);
+         tp=PrecoAjustado(MathMin(entrada-distanciaTP,entrada-minStop),-1);
+      }
    }
    else
    {
-      sl=PrecoAjustado(MathMax(entrada+distanciaSL,tick.ask+minStop),1);
-      tp=PrecoAjustado(MathMin(entrada-distanciaTP,tick.ask-minStop),-1);
+      entrada=(lado>0?tick.ask:tick.bid);
+      if(lado>0)
+      {
+         sl=PrecoAjustado(MathMin(entrada-distanciaSL,tick.bid-minStop),-1);
+         tp=PrecoAjustado(MathMax(entrada+distanciaTP,tick.bid+minStop),1);
+      }
+      else
+      {
+         sl=PrecoAjustado(MathMax(entrada+distanciaSL,tick.ask+minStop),1);
+         tp=PrecoAjustado(MathMin(entrada-distanciaTP,tick.ask-minStop),-1);
+      }
    }
    if(sl<=0 || tp<=0 || (lado>0 && (sl>=entrada || tp<=entrada)) ||
       (lado<0 && (sl<=entrada || tp>=entrada)))
@@ -537,7 +596,7 @@ bool CalcularStops(const int lado, const double atr, const MqlTick &tick,
    return true;
 }
 
-bool EnviarOrdem(const int lado, const double atr)
+bool EnviarOrdem(const int lado, const double atr, const double nivelRompido)
 {
    string motivo="";
    if(!SimboloPermiteLado(lado,motivo)) {estado=motivo;return false;}
@@ -548,8 +607,27 @@ bool EnviarOrdem(const int lado, const double atr)
       estado="Cotacoes bid/ask invalidas";
       return false;
    }
+   // Reteste: ordem limitada no nivel rompido. Se o preco ja estiver no nivel
+   // (ou perto demais para uma ordem limitada), entra a mercado.
+   double precoLimite=0.0;
+   if(ModoEntrada==ENTRADA_RETESTE && nivelRompido>0.0)
+   {
+      double passoP=SymbolInfoDouble(_Symbol,SYMBOL_TRADE_TICK_SIZE);
+      if(passoP<=0) passoP=_Point;
+      double distMin=(double)SymbolInfoInteger(_Symbol,SYMBOL_TRADE_STOPS_LEVEL)*_Point+passoP;
+      if(lado>0)
+      {
+         precoLimite=PrecoAjustado(nivelRompido+FolgaRetesteATR*atr,-1);
+         if(precoLimite>tick.ask-distMin) precoLimite=0.0;
+      }
+      else
+      {
+         precoLimite=PrecoAjustado(nivelRompido-FolgaRetesteATR*atr,1);
+         if(precoLimite<tick.bid+distMin) precoLimite=0.0;
+      }
+   }
    double entrada,sl,tp;
-   if(!CalcularStops(lado,atr,tick,entrada,sl,tp)) return false;
+   if(!CalcularStops(lado,atr,tick,precoLimite,entrada,sl,tp)) return false;
 
    ENUM_ORDER_TYPE tipo=(lado>0?ORDER_TYPE_BUY:ORDER_TYPE_SELL);
    double solicitado=LoteFixo;
@@ -596,23 +674,30 @@ bool EnviarOrdem(const int lado, const double atr)
       return false;
    }
 
-   string comentario="EA09 ATR prototipo v2.20";
+   string comentario="EA09 ATR prototipo v2.30";
    int tentativas=MathMax(1,TentativasDeEnvio);
    uint resposta=0;
    bool enviado=false;
+   ENUM_ORDER_TYPE_TIME validadeTipo=ORDER_TIME_GTC;
+   if((SymbolInfoInteger(_Symbol,SYMBOL_EXPIRATION_MODE)&SYMBOL_EXPIRATION_DAY)!=0) validadeTipo=ORDER_TIME_DAY;
    for(int t=1; t<=tentativas; t++)
    {
-      enviado=(lado>0 ? negociador.Buy(lote,_Symbol,0.0,sl,tp,comentario)
-                      : negociador.Sell(lote,_Symbol,0.0,sl,tp,comentario));
+      if(precoLimite>0.0)
+         enviado=(lado>0 ? negociador.BuyLimit(lote,precoLimite,_Symbol,sl,tp,validadeTipo,0,comentario)
+                         : negociador.SellLimit(lote,precoLimite,_Symbol,sl,tp,validadeTipo,0,comentario));
+      else
+         enviado=(lado>0 ? negociador.Buy(lote,_Symbol,0.0,sl,tp,comentario)
+                         : negociador.Sell(lote,_Symbol,0.0,sl,tp,comentario));
       resposta=negociador.ResultRetcode();
-      if(enviado && (resposta==TRADE_RETCODE_DONE || resposta==TRADE_RETCODE_DONE_PARTIAL)) break;
+      if(enviado && (resposta==TRADE_RETCODE_DONE || resposta==TRADE_RETCODE_DONE_PARTIAL ||
+                     resposta==TRADE_RETCODE_PLACED)) break;
       enviado=false;
       if(t==tentativas || !RetcodeRepetivel(resposta)) break;
       if(MostrarDiagnosticos)
          PrintFormat("Tentativa %d/%d recusada (%s); recalculando precos.",t,tentativas,negociador.ResultRetcodeDescription());
       if(!MQLInfoInteger(MQL_TESTER)) Sleep(200);
       // Recalcula SL/TP com o tick novo para manter as distancias.
-      if(!SymbolInfoTick(_Symbol,tick) || !CalcularStops(lado,atr,tick,entrada,sl,tp)) break;
+      if(precoLimite<=0.0 && (!SymbolInfoTick(_Symbol,tick) || !CalcularStops(lado,atr,tick,0.0,entrada,sl,tp))) break;
    }
    if(!enviado)
    {
@@ -623,11 +708,51 @@ bool EnviarOrdem(const int lado, const double atr)
    }
    ordensEnviadas++;
    historicoSujo=true;
-   estado=(lado>0?"COMPRA executada":"VENDA executada");
+   if(precoLimite>0.0)
+      estado=StringFormat("%s LIMITADA em %s (reteste)",lado>0?"COMPRA":"VENDA",DoubleToString(precoLimite,_Digits));
+   else
+      estado=(lado>0?"COMPRA executada":"VENDA executada");
    if(MostrarDiagnosticos)
       PrintFormat("%s: lote %.4f, SL %.5f, TP %.5f, ATR %.6f, risco %.2f (%.1f%% do patrimonio)",
                   estado,lote,sl,tp,atr,MathAbs(perdaAteSL),riscoPct);
    return true;
+}
+
+bool PendenteDoEA()
+{
+   if(OrderGetString(ORDER_SYMBOL)!=_Symbol || OrderGetInteger(ORDER_MAGIC)!=NumeroMagico) return false;
+   long tipo=OrderGetInteger(ORDER_TYPE);
+   return tipo==ORDER_TYPE_BUY_LIMIT || tipo==ORDER_TYPE_SELL_LIMIT;
+}
+
+int QuantidadeDePendentes()
+{
+   int q=0;
+   for(int i=OrdersTotal()-1; i>=0; i--)
+   {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket>0 && OrderSelect(ticket) && PendenteDoEA()) q++;
+   }
+   return q;
+}
+
+// Cancela ordens de reteste vencidas (ou todas, se cancelarTodas).
+void GerenciarPendentes(const bool cancelarTodas)
+{
+   int validade=MathMax(1,BarrasValidadeReteste)*PeriodSeconds(PeriodoDosSinais);
+   for(int i=OrdersTotal()-1; i>=0; i--)
+   {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0 || !OrderSelect(ticket) || !PendenteDoEA()) continue;
+      datetime criada=(datetime)OrderGetInteger(ORDER_TIME_SETUP);
+      if(!cancelarTodas && TimeCurrent()-criada < validade) continue;
+      if(negociador.OrderDelete(ticket))
+      {
+         if(MostrarDiagnosticos) PrintFormat("Ordem de reteste %I64u cancelada (%s).",ticket,cancelarTodas?"bloqueio/zeragem":"validade vencida");
+      }
+      else if(MostrarDiagnosticos)
+         PrintFormat("Falha ao cancelar ordem %I64u: %s",ticket,negociador.ResultRetcodeDescription());
+   }
 }
 
 void LimparPainel()
@@ -676,7 +801,7 @@ void AtualizarPainel()
    double spread=0;
    if(SymbolInfoTick(_Symbol,tick) && tick.ask>=tick.bid) spread=(tick.ask-tick.bid)/_Point;
    bool permitido=OperacoesPermitidasPeloAmbiente();
-   LinhaPainel(0,"EA 09 | ROMPIMENTO ATR | REVISAO v2.20",clrWhite);
+   LinhaPainel(0,"EA 09 | ROMPIMENTO ATR | REVISAO v2.30",clrWhite);
    LinhaPainel(1,"MODELO PROVISORIO - VIDEO NAO VERIFICADO",C'255,189,84');
    LinhaPainel(2,"Ativo: "+_Symbol+" | Periodo: "+EnumToString(PeriodoDosSinais),C'210,225,240');
    LinhaPainel(3,"Entradas: "+(permitido?"AUTORIZADAS":"BLOQUEADAS"),permitido?clrLime:clrOrange);
@@ -719,6 +844,7 @@ int OnInit()
       PerdasSeguidasMaximasDia<0 || BarrasEsperaAposStop<0 ||
       RebaixamentoMaximoPct<0.0 || RebaixamentoMaximoPct>=100.0 ||
       StopMinimoPontos<0 || StopMaximoPontos<0 || RiscoMaximoLoteFixoPct<0.0 ||
+      TamanhoMaximoCandleATR<0.0 || PeriodoADX<2 || ADXMinimo<0.0 || FolgaRetesteATR<0.0 || BarrasValidadeReteste<1 ||
       PerdaMaximaDiaMoeda<0.0 || GanhoMaximoDiaMoeda<0.0 || MinimoOperacoesOtimizacao<0 ||
       BreakEvenInicioPontos<0 || BreakEvenTravaPontos<0 || TrailingInicioPontos<0 || TrailingDistanciaPontos<0)
       parametrosOk=false;
@@ -757,13 +883,22 @@ int OnInit()
    }
    picoPatrimonio=AccountInfoDouble(ACCOUNT_EQUITY);
    bloqueioPorRebaixamento=false;
+   if(HabilitarFiltroADX)
+   {
+      handleADX=iADX(_Symbol,PeriodoDosSinais,PeriodoADX);
+      if(handleADX==INVALID_HANDLE)
+      {
+         PrintFormat("ERRO: nao foi possivel criar ADX. GetLastError()=%d",GetLastError());
+         return INIT_FAILED;
+      }
+   }
    // Nao entra no meio da barra em andamento ao anexar o EA.
    ultimaBarraProcessada=iTime(_Symbol,PeriodoDosSinais,0);
    prefixo="EA09_ATR_V2_"+IntegerToString(NumeroMagico)+"_";
    painelDisponivel=(ExibirPainel && (!MQLInfoInteger(MQL_TESTER) || MQLInfoInteger(MQL_VISUAL_MODE)));
    if(painelDisponivel) EventSetTimer(5);
    estado=(OperacoesPermitidasPeloAmbiente()?"Pronto para teste":"Entradas bloqueadas neste ambiente");
-   Print("EA09 ATR v2.20 inicializado. PERMISSAO=",OperacoesPermitidasPeloAmbiente(),
+   Print("EA09 ATR v2.30 inicializado. PERMISSAO=",OperacoesPermitidasPeloAmbiente(),
          ", Testador=",MQLInfoInteger(MQL_TESTER),", Simbolo=",_Symbol,
          ", Timeframe=",EnumToString(PeriodoDosSinais),
          ". Estrategia prototipo, NAO extraida do video.");
@@ -776,8 +911,9 @@ void OnDeinit(const int motivo)
    if(painelDisponivel) EventKillTimer();
    if(handleATR!=INVALID_HANDLE) IndicatorRelease(handleATR);
    if(handleEMA!=INVALID_HANDLE) IndicatorRelease(handleEMA);
+   if(handleADX!=INVALID_HANDLE) IndicatorRelease(handleADX);
    if(painelDisponivel) LimparPainel();
-   PrintFormat("RESUMO EA09 v2.20: barras=%I64d, sinais compra=%I64d, sinais venda=%I64d, ordens=%I64d, rejeicoes=%I64d, bloqueios=%I64d, ultimo estado=%s",
+   PrintFormat("RESUMO EA09 v2.30: barras=%I64d, sinais compra=%I64d, sinais venda=%I64d, ordens=%I64d, rejeicoes=%I64d, bloqueios=%I64d, ultimo estado=%s",
                barrasProcessadas, sinaisCompra, sinaisVenda, ordensEnviadas, ordensRejeitadas, bloqueiosPorFiltro, estado);
 }
 
@@ -819,6 +955,7 @@ void OnTick()
    GerenciarPosicoes();
    if(!AtualizarHistorico()) return;
    if(QuantidadeDePosicoes()==0) fechamentoLimiteAvisado=false;
+   GerenciarPendentes(false);
 
    // Trava de rebaixamento: patrimonio caiu X% do maior valor ja visto.
    double patrimonio=AccountInfoDouble(ACCOUNT_EQUITY);
@@ -833,6 +970,7 @@ void OnTick()
    if(bloqueioPorRebaixamento)
    {
       estado="Desligado: rebaixamento maximo atingido";
+      GerenciarPendentes(true);
       if(QuantidadeDePosicoes()>0) FecharPosicoesDoEA();
       return;
    }
@@ -841,6 +979,7 @@ void OnTick()
    if(HorarioDeEncerramento())
    {
       estado="Horario de zeragem: sem novas entradas";
+      GerenciarPendentes(true);
       if(QuantidadeDePosicoes()>0) FecharPosicoesDoEA();
       return;
    }
@@ -862,6 +1001,7 @@ void OnTick()
    if(diaBloqueado==hoje)
    {
       estado="Limite financeiro do dia atingido";
+      GerenciarPendentes(true);
       if(FecharNoLimiteDiario && QuantidadeDePosicoes()>0) FecharPosicoesDoEA();
       return;
    }
@@ -884,6 +1024,8 @@ void OnTick()
 
    if(sinal>0 && !PermitirCompras) {Bloquear("Compras desativadas");return;}
    if(sinal<0 && !PermitirVendas)  {Bloquear("Vendas desativadas");return;}
+   if(QuantidadeDePendentes()>0)
+      {Bloquear("Ja existe ordem de reteste pendente");return;}
    if(BloquearSeExistePosicaoNoAtivo && ExisteQualquerPosicaoNoSimbolo())
       {Bloquear("Ja existe posicao neste ativo");return;}
    if(!BloquearSeExistePosicaoNoAtivo && QuantidadeDePosicoes()>0)
@@ -906,7 +1048,9 @@ void OnTick()
       Bloquear(StringFormat("Spread %.1f > limite %d",spread,SpreadMaximoPontos),true);
       return;
    }
-   if(!EnviarOrdem(sinal,atr) && MostrarDiagnosticos) Print("Sinal existente, ordem nao executada: ",estado);
+   // Nivel rompido (sem o excesso): referencia para a ordem de reteste.
+   double nivel=(sinal>0 ? superior-ExcessoRompimentoATR*atr : inferior+ExcessoRompimentoATR*atr);
+   if(!EnviarOrdem(sinal,atr,nivel) && MostrarDiagnosticos) Print("Sinal existente, ordem nao executada: ",estado);
    AtualizarPainel();
 }
 //+------------------------------------------------------------------+

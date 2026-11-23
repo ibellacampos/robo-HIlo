@@ -1,0 +1,75 @@
+; EA09_RompimentoATR v2.30 - WIN (mini indice B3), sinais em M5
+; Ponto de partida derivado do backtest out-nov/2026 (129 operacoes, PF 0.81).
+; Valores NAO otimizados. Parametros marcados com Y ja vem com faixa de otimizacao
+; (use "Algoritmo genetico" e criterio "Custom max").
+; Teste: deposito 10000, modelo "Todos os ticks com base em ticks reais", periodo >= 6 meses.
+;
+; 01 - TESTADOR E PERMISSOES
+PermitirNoTestador=true||false||0||true||N
+PermitirEmDemo=false||false||0||true||N
+PermitirEmContaReal=false||false||0||true||N
+NumeroMagico=2601122009||2601122009||1||26011220090||N
+PeriodoDosSinais=5||0||0||49153||N
+PermitirCompras=true||false||0||true||N
+PermitirVendas=true||false||0||true||N
+DesvioMaximoPontos=20||20||1||200||N
+TentativasDeEnvio=3||3||1||30||N
+MostrarDiagnosticos=true||false||0||true||N
+; 02 - ESTRATEGIA ATR (PROTOTIPO)
+PeriodoATR=14||14||1||140||N
+BarrasDeReferencia=6||3||3||12||Y
+ExcessoRompimentoATR=0.1||0.05||0.05||0.3||N
+ExigirCandleNaDirecao=true||false||0||true||N
+HabilitarFiltroEMA=true||false||0||true||N
+PeriodoEMA=50||50||1||500||N
+TamanhoMaximoCandleATR=1.5||1.0||0.5||2.5||Y
+HabilitarFiltroADX=true||false||0||true||N
+PeriodoADX=14||14||1||140||N
+ADXMinimo=20||15||5||30||Y
+ModoEntrada=1||0||1||1||Y
+FolgaRetesteATR=0.1||0.0||0.1||0.3||N
+BarrasValidadeReteste=3||1||1||6||N
+; 03 - LOTE, STOP E ALVO
+UsarLotePorRisco=false||false||0||true||N
+LoteFixo=1||1||1||10||N
+AjustarLoteFixoAoMinimo=true||false||0||true||N
+RiscoPorOperacaoPct=1||0.5||0.05||5.0||N
+ModoStopAlvo=0||0||0||1||N
+StopMultiploATR=1.5||1.0||0.5||2.5||Y
+AlvoMultiploATR=2.5||1.5||0.5||3.5||Y
+StopLossPontos=300||300||1||3000||N
+TakeProfitPontos=600||600||1||6000||N
+; 04 - HORARIO E SESSAO (padrao: B3 day trade)
+HoraInicioServidor=9||9||1||10||N
+MinutoInicioServidor=15||15||1||59||N
+HoraFimServidor=17||17||1||17||N
+MinutoFimServidor=0||0||1||59||N
+EncerrarNoHorario=true||false||0||true||N
+HoraEncerramento=17||17||1||17||N
+MinutoEncerramento=45||45||1||59||N
+ExigirCanalDoMesmoDia=true||false||0||true||N
+; 05 - FILTROS E LIMITES
+SpreadMaximoPontos=0||0||1||10||N
+OperacoesMaximasDia=0||0||1||10||N
+PerdasSeguidasMaximasDia=3||2||1||4||N
+BarrasEsperaAposStop=2||1||1||6||N
+PerdaMaximaDiaMoeda=0.0||0.0||0.0||0.0||N
+GanhoMaximoDiaMoeda=0.0||0.0||0.0||0.0||N
+FecharNoLimiteDiario=true||false||0||true||N
+RebaixamentoMaximoPct=30||30.0||3.0||300.0||N
+BloquearSeExistePosicaoNoAtivo=true||false||0||true||N
+; 06 - LIMITES DO STOP E DO RISCO
+StopMinimoPontos=200||0||1||10||N
+StopMaximoPontos=600||0||1||10||N
+RiscoMaximoLoteFixoPct=2||0.0||0.0||0.0||N
+; 07 - GERENCIAMENTO DE POSICOES
+BreakEvenInicioPontos=0||0||1||10||N
+BreakEvenTravaPontos=0||0||1||10||N
+TrailingInicioPontos=0||0||1||10||N
+TrailingDistanciaPontos=0||0||1||10||N
+; 08 - PAINEL DE RESULTADOS
+ExibirPainel=true||false||0||true||N
+PainelPosicaoX=12||12||1||120||N
+PainelPosicaoY=16||16||1||160||N
+; 09 - OTIMIZACAO (OnTester)
+MinimoOperacoesOtimizacao=30||30||1||300||N
